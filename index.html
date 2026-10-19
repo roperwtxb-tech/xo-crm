@@ -238,6 +238,7 @@ tr:hover .contact-name{text-decoration:underline}
       <div class="nav-item" onclick="showPage('contacts')" id="nav-contacts"><i class="ti ti-users"></i> Contacts</div>
       <div class="nav-item" onclick="showPage('deals')" id="nav-deals"><i class="ti ti-currency-dollar"></i> Deals</div>
       <div class="nav-item" onclick="showPage('simrp')" id="nav-simrp"><i class="ti ti-building-community"></i> SIMRP</div>
+      <div class="nav-item" onclick="showPage('rollovers')" id="nav-rollovers"><i class="ti ti-arrows-exchange"></i> Rollovers</div>
       <div class="nav-item" onclick="showPage('referrals')" id="nav-referrals"><i class="ti ti-user-share"></i> Referrals</div>
       <div class="nav-item" onclick="showPage('tasks')" id="nav-tasks"><i class="ti ti-checkbox"></i> Tasks</div>
       <div class="nav-item" onclick="showPage('workflows')" id="nav-workflows"><i class="ti ti-route"></i> Workflows</div>
@@ -256,6 +257,7 @@ tr:hover .contact-name{text-decoration:underline}
       <div id="page-contacts" style="display:none"></div>
       <div id="page-deals" style="display:none"></div>
       <div id="page-simrp" style="display:none"></div>
+      <div id="page-rollovers" style="display:none"></div>
       <div id="page-referrals" style="display:none"></div>
       <div id="page-tasks" style="display:none"></div>
       <div id="page-workflows" style="display:none"></div>
@@ -353,7 +355,7 @@ async function doLogout(){
 let DB={contacts:[],deals:[],tasks:[],emails:[],campaigns:[]};
 let CUSTOM_FIELDS=[];
 let _pendingSave = Promise.resolve();
-function emptyDB(){ return {contacts:[],deals:[],tasks:[],emails:[],campaigns:[],simrp:[],simrpLinks:{}}; }
+function emptyDB(){ return {contacts:[],deals:[],tasks:[],emails:[],campaigns:[],simrp:[],simrpLinks:{},rollovers:[]}; }
 async function initDB(){
   DB = emptyDB(); CUSTOM_FIELDS = [];
   const { data, error } = await sb.from('crm_data').select('data,custom_fields').eq('agent_id', CURRENT_AGENT_ID).maybeSingle();
@@ -377,6 +379,8 @@ function normalizeDB(){
     if(c.city===undefined) c.city='';
     if(c.state===undefined) c.state='';
     if(c.zip===undefined) c.zip='';
+    if(c.mailSame===undefined) c.mailSame=true;
+    ['mailAddress','mailCity','mailState','mailZip'].forEach(k=>{if(c[k]===undefined)c[k]='';});
     if(c.birthday===undefined) c.birthday='';
     if(c.clientSince===undefined) c.clientSince='';
     if(c.spouseName===undefined) c.spouseName='';
@@ -398,6 +402,7 @@ function normalizeDB(){
   if(!Array.isArray(DB.templates)) DB.templates=defaultTemplates();
   if(!Array.isArray(DB.simrp)) DB.simrp=[];
   if(!DB.simrpLinks || typeof DB.simrpLinks!=='object') DB.simrpLinks={};
+  normalizeRollovers();
   const meName=(CURRENT_USER&&USERS[CURRENT_USER])?USERS[CURRENT_USER].name:'Me';
   DB.simrp.forEach(o=>{
     if(!o.stage) o.stage='Lead';
@@ -460,7 +465,7 @@ const REF_STATUSES=[
 ];
 const REF_STATUS_MAP=Object.fromEntries(REF_STATUSES.map(s=>[s.k,s]));
 const VERTICALS=['School District','Educator','Coach','Private Sector','Other'];
-const PRODUCTS=['403(b)','457(b)','Life Insurance','Final Expense','Annuity','IRA','Roth IRA','Other'];
+const PRODUCTS=['403(b)','457(b)','Life Insurance','IUL','Final Expense','Annuity','IRA','Roth IRA','Other'];
 const TEMPLATE_CATS=['Cross-sell','Prospecting','Re-engage','Nurture','Seasonal','Other'];
 const AGE_BRACKETS=[
   {label:'Under 35',min:0,max:34},
@@ -605,7 +610,7 @@ function topbar(title,actionsHtml=''){
 }
 function toggleSidebar(){document.getElementById('sidebar').classList.toggle('open');document.getElementById('sidebar-overlay').classList.toggle('open');}
 function closeSidebar(){document.getElementById('sidebar').classList.remove('open');document.getElementById('sidebar-overlay').classList.remove('open');}
-const PAGES=['dashboard','contacts','deals','simrp','referrals','tasks','workflows','calendar','emails','marketing','reports','guide','settings'];
+const PAGES=['dashboard','contacts','deals','simrp','rollovers','referrals','tasks','workflows','calendar','emails','marketing','reports','guide','settings'];
 function showPage(p){
   if(p!=='contacts'){ contactSearch=''; }
   PAGES.forEach(pg=>{
@@ -618,6 +623,7 @@ function showPage(p){
   else if(p==='contacts')renderContacts();
   else if(p==='deals')renderDeals();
   else if(p==='simrp')renderSimrp();
+  else if(p==='rollovers')renderRollovers();
   else if(p==='referrals')renderReferrals();
   else if(p==='tasks')renderTasks();
   else if(p==='workflows')renderWorkflows();
@@ -679,6 +685,7 @@ function renderDashboard(){
       </div>
     </div>
     ${contactFollowupCard()}
+    ${rolloverDashboardCard()}
     ${simrpDashboardCard()}
     <div class="grid-2" style="gap:16px">
       <div class="card">
@@ -912,6 +919,7 @@ function normalizeOne(c){
     stage:REL_STAGES.includes(c.stage)?c.stage:(legacy[c.status]||'Lead'),
     vertical:c.vertical||'',district:c.district||'',household:c.household||'',
     address:c.address||'',city:c.city||'',state:c.state||'',zip:c.zip||'',
+    mailSame:c.mailSame!==false,mailAddress:c.mailAddress||'',mailCity:c.mailCity||'',mailState:c.mailState||'',mailZip:c.mailZip||'',
     birthday:c.birthday||'',clientSince:c.clientSince||'',
     spouseName:c.spouseName||'',spouseBirthday:c.spouseBirthday||'',
     children:Array.isArray(c.children)?c.children:[],
@@ -975,15 +983,17 @@ function restoreBackupFile(){
     alert('Backup restored.');
   });
 }
+// Where mail should actually go: the mailing address if different, otherwise the street address
+function contactMailing(c){const d=c.mailSame===false&&(c.mailAddress||c.mailCity||c.mailZip);return d?[c.mailAddress||'',c.mailCity||'',c.mailState||'',c.mailZip||'']:[c.address||'',c.city||'',c.state||'',c.zip||''];}
 function exportCSV(){
   const cfKeys=CUSTOM_FIELDS.map(f=>f.key);
-  const cols=['first name','last name','name','email','phone','stage','vertical','district','address','city','state','zip','birthday','age','clientSince','spouseName','interests','policies','tags',...cfKeys];
+  const cols=['first name','last name','name','email','phone','stage','vertical','district','address','city','state','zip','birthday','age','clientSince','spouseName','interests','policies','tags',...cfKeys,'mailing address','mailing city','mailing state','mailing zip'];
   const rows=DB.contacts.map(c=>{
     const _nm=(c.name||'').trim();const _sp=_nm.indexOf(' ');const _first=_sp<0?_nm:_nm.slice(0,_sp);const _last=_sp<0?'':_nm.slice(_sp+1);
     const row=[_first,_last,c.name,c.email,c.phone,c.stage,c.vertical,c.district,c.address,c.city,c.state,c.zip,c.birthday,calcAge(c.birthday)??'',c.clientSince,c.spouseName,
       (c.interests||[]).join('; '),
       (c.policies||[]).map(p=>`${p.company} ${p.product} ${p.number}`.trim()).join(' | '),
-      c.tags||'',...cfKeys.map(k=>(c.custom&&c.custom[k])||'')];
+      c.tags||'',...cfKeys.map(k=>(c.custom&&c.custom[k])||''),...contactMailing(c)];
     return row.map(v=>`"${String(v==null?'':v).replace(/"/g,'""')}"`).join(',');
   });
   const blob=new Blob([cols.join(',')+'\n'+rows.join('\n')],{type:'text/csv'});
@@ -1011,6 +1021,13 @@ function openContactModal(id=''){
       <div class="form-row" style="grid-template-columns:2fr 1fr 1fr"><div class="form-group" style="margin:0"><label>City</label><input id="c-city" value="${(c.city||'').replace(/"/g,'&quot;')}"/></div>
       <div class="form-group" style="margin:0"><label>State</label><input id="c-state" value="${(c.state||'').replace(/"/g,'&quot;')}"/></div>
       <div class="form-group" style="margin:0"><label>ZIP</label><input id="c-zip" value="${(c.zip||'').replace(/"/g,'&quot;')}"/></div></div>
+      <label class="chk" style="margin-top:10px"><input type="checkbox" id="c-mailsame" ${c.mailSame!==false?'checked':''} onchange="document.getElementById('c-mail-wrap').style.display=this.checked?'none':'block'"/> Mailing address is the same as street address</label>
+      <div id="c-mail-wrap" style="display:${c.mailSame!==false?'none':'block'};margin-top:10px">
+        <div class="form-group"><label>Mailing address</label><input id="c-mailaddr" value="${sattr(c.mailAddress)}" placeholder="PO Box 123 or RR 2 Box 45"/></div>
+        <div class="form-row" style="grid-template-columns:2fr 1fr 1fr"><div class="form-group" style="margin:0"><label>City</label><input id="c-mailcity" value="${sattr(c.mailCity)}"/></div>
+        <div class="form-group" style="margin:0"><label>State</label><input id="c-mailstate" value="${sattr(c.mailState)}"/></div>
+        <div class="form-group" style="margin:0"><label>ZIP</label><input id="c-mailzip" value="${sattr(c.mailZip)}"/></div></div>
+      </div>
     </div>
     <div class="modal-section"><div class="modal-section-title">Key dates &amp; family</div>
       <div class="form-row"><div class="form-group" style="margin:0"><label>Birthday</label><input id="c-birthday" type="date" value="${c.birthday||''}"/></div>
@@ -1059,7 +1076,7 @@ function captureContactDraft(){
   contactDraft={
     stage:g('c-stage'),name:g('c-name'),email:g('c-email'),phone:g('c-phone'),
     vertical:g('c-vertical'),district:g('c-district'),household:g('c-household'),
-    address:g('c-address'),city:g('c-city'),state:g('c-state'),zip:g('c-zip'),employees:g('c-employees'),
+    address:g('c-address'),city:g('c-city'),state:g('c-state'),zip:g('c-zip'),mailSame:(document.getElementById('c-mailsame')||{checked:true}).checked,mailAddress:g('c-mailaddr'),mailCity:g('c-mailcity'),mailState:g('c-mailstate'),mailZip:g('c-mailzip'),employees:g('c-employees'),
     birthday:g('c-birthday'),clientSince:g('c-clientsince'),spouseName:g('c-spouse'),spouseBirthday:g('c-spousebday'),
     children:collectChildren(),interests:collectInterests(),policies:collectPolicies(),
     tags:g('c-tags'),nextFollowup:g('c-followup'),dripStep:g('c-dripstep'),referredBy:g('c-refby'),refStatus:g('c-refstatus'),
@@ -1067,7 +1084,7 @@ function captureContactDraft(){
     _draftNote:g('c-note'),custom:{}
   };
 }
-function cancelContactModal(){ contactDraft=null; currentContactModalMode=null; closeModal(); }
+function cancelContactModal(){ contactDraft=null; currentContactModalMode=null; rollPendingLink=null; closeModal(); }
 function saveContact(id){
   const name=document.getElementById('c-name').value.trim();
   if(!name){alert('Name is required.');return;}
@@ -1086,6 +1103,11 @@ function saveContact(id){
     city:document.getElementById('c-city').value.trim(),
     state:document.getElementById('c-state').value.trim(),
     zip:document.getElementById('c-zip').value.trim(),
+    mailSame:document.getElementById('c-mailsame').checked,
+    mailAddress:document.getElementById('c-mailsame').checked?'':document.getElementById('c-mailaddr').value.trim(),
+    mailCity:document.getElementById('c-mailsame').checked?'':document.getElementById('c-mailcity').value.trim(),
+    mailState:document.getElementById('c-mailsame').checked?'':document.getElementById('c-mailstate').value.trim(),
+    mailZip:document.getElementById('c-mailsame').checked?'':document.getElementById('c-mailzip').value.trim(),
     birthday:document.getElementById('c-birthday').value,
     clientSince:document.getElementById('c-clientsince').value,
     spouseName:document.getElementById('c-spouse').value.trim(),
@@ -1115,7 +1137,9 @@ function saveContact(id){
   contactDraft=null; currentContactModalMode=null;
   let auto=0;
   if(data.stage && data.stage!==oldStage){ auto=autoRunWorkflows(data.stage,cid); }
+  const _rl=rollLinkContact(contactObj);
   save();closeModal();renderContacts();
+  if(_rl){ showToast('Rollover'+(_rl.n===1?'':'s')+' linked to '+contactObj.name,'ok'); if(_rl.pendingHit){ showPage('rollovers'); setTimeout(()=>openRolloverDetail(_rl.pendingHit),60); } else rollRefresh(); }
   if(auto) showToast(auto+' task'+(auto===1?'':'s')+' added by "'+data.stage+'" workflow','ok');
 }
 function deleteContact(id){if(!confirm('Delete this contact?'))return;DB.contacts=DB.contacts.filter(x=>x.id!==id);save();renderContacts();}
@@ -1128,7 +1152,7 @@ function openRetireCalc(id){
 }
 function openContactDetail(id){
   const c=DB.contacts.find(x=>x.id===id);if(!c)return;
-  const cd=DB.deals.filter(d=>d.contactId===id),ct=DB.tasks.filter(t=>t.contactId===id),ce=DB.emails.filter(e=>e.contactId===id);
+  const cd=DB.deals.filter(d=>d.contactId===id),cr=(DB.rollovers||[]).filter(r=>r.contactId===id),ct=DB.tasks.filter(t=>t.contactId===id),ce=DB.emails.filter(e=>e.contactId===id);
   const age=calcAge(c.birthday);
   const addr=[c.address,[c.city,c.state].filter(Boolean).join(', '),c.zip].filter(Boolean).join(' · ');
   const info=[];
@@ -1141,7 +1165,9 @@ function openContactDetail(id){
   info.push(['Birthday',c.birthday?`${fmtMD(c.birthday)}${age!=null?' ('+age+')':''} ${calLink(gcalBirthday(c.name,c.birthday,c.name))}`:'—']);
   info.push(['Client since',c.clientSince?`${fmtDate(c.clientSince)} ${calLink(gcalAnniv(c.name,c.clientSince))}`:'—']);
   if(c.spouseName)info.push(['Spouse',`${c.spouseName}${c.spouseBirthday?' · '+fmtMD(c.spouseBirthday)+' '+calLink(gcalBirthday(c.spouseName,c.spouseBirthday,c.name)):''}`]);
-  if(addr)info.push(['Address',addr]);
+  const mailDiff=c.mailSame===false&&(c.mailAddress||c.mailCity||c.mailZip);
+  if(addr)info.push([mailDiff?'Street address':'Address',addr]);
+  if(mailDiff)info.push(['Mailing address',[c.mailAddress,[c.mailCity,c.mailState].filter(Boolean).join(', '),c.mailZip].filter(Boolean).join(' · ')]);
   const childrenHtml=(c.children&&c.children.length)?`<div class="info-item" style="grid-column:1/-1"><span class="lbl">Children</span>${c.children.map(ch=>`${ch.name}${ch.birthday?' ('+fmtMD(ch.birthday)+') '+calLink(gcalBirthday(ch.name,ch.birthday,c.name)):''}`).join(', ')}</div>`:'';
   const interestsHtml=(c.interests&&c.interests.length)?`<div style="margin-bottom:10px;display:flex;flex-wrap:wrap;gap:6px">${c.interests.map(i=>`<span class="badge badge-purple">${i}</span>`).join('')}</div>`:'';
   const policiesHtml=(c.policies&&c.policies.length)?`<div class="modal-section"><div class="modal-section-title">Policies (${c.policies.length})</div>${c.policies.map(p=>`<div style="padding:8px 0;border-bottom:0.5px solid var(--color-border-tertiary)"><div style="font-size:13px;font-weight:500">${p.company||'—'} <span class="badge badge-blue" style="margin-left:4px">${p.product||''}</span></div><div style="font-size:11px;color:var(--color-text-secondary)">Policy #${p.number||'—'}${p.effective?' · effective '+fmtDate(p.effective):''}</div></div>`).join('')}</div>`:'';
@@ -1175,6 +1201,7 @@ function openContactDetail(id){
       <div class="tab active" onclick="detailTab('activity','${id}')">Activity</div>
       <div class="tab" onclick="detailTab('notes','${id}')">Notes</div>
       <div class="tab" onclick="detailTab('deals','${id}')">Deals (${cd.length})</div>
+      <div class="tab" onclick="detailTab('rollovers','${id}')">Rollovers (${cr.length})</div>
       <div class="tab" onclick="detailTab('tasks','${id}')">Tasks (${ct.length})</div>
       <div class="tab" onclick="detailTab('emails','${id}')">Emails (${ce.length})</div>
     </div>
@@ -1183,12 +1210,13 @@ function openContactDetail(id){
   <div class="modal-footer"><button class="btn" onclick="openTaskModal('','${id}')"><i class="ti ti-plus"></i> Add task</button><button class="btn" onclick="openRetireCalc('${id}')"><i class="ti ti-calculator"></i> Gap Calculator</button><button class="btn" onclick="openContactModal('${id}')"><i class="ti ti-edit"></i> Edit</button></div>`);
 }
 function detailTab(tab,id){
-  document.querySelectorAll('#detail-tabs .tab').forEach((el,i)=>el.classList.toggle('active',['activity','notes','deals','tasks','emails'][i]===tab));
+  document.querySelectorAll('#detail-tabs .tab').forEach((el,i)=>el.classList.toggle('active',['activity','notes','deals','rollovers','tasks','emails'][i]===tab));
   const c=DB.contacts.find(x=>x.id===id);
   const dc=document.getElementById('detail-content');
   if(tab==='activity')dc.innerHTML=renderContactActivity(c);
   else if(tab==='notes')dc.innerHTML=renderContactNotes(c);
   else if(tab==='deals')dc.innerHTML=`<div style="margin-top:8px">${DB.deals.filter(d=>d.contactId===id).map(d=>`<div style="padding:8px 0;border-bottom:0.5px solid var(--color-border-tertiary)"><span style="font-weight:500">${d.name}</span> <span class="badge ${STAGE_COLORS[d.stage]}">${d.stage}</span><span style="float:right;font-weight:500;color:var(--color-text-info)">${fmt(d.value)}</span></div>`).join('')||'<p style="color:var(--color-text-secondary);font-size:13px;margin-top:8px">No deals</p>'}</div>`;
+  else if(tab==='rollovers')dc.innerHTML=rollContactTabHtml(id);
   else if(tab==='tasks')dc.innerHTML=`<div style="margin-top:8px">${DB.tasks.filter(t=>t.contactId===id).map(t=>`<div class="task-item"><div class="task-check ${t.done?'done':''}" onclick="toggleTaskInDetail('${t.id}','${id}')">${t.done?'<i class="ti ti-check" style="font-size:10px;color:white"></i>':''}</div><div style="flex:1"><div style="font-size:13px;${t.done?'text-decoration:line-through;color:var(--color-text-secondary)':''}">${t.title}</div><div style="font-size:11px;color:var(--color-text-secondary)">Due ${fmtDate(t.due)}</div></div>${calLink(gcalTask(t))}</div>`).join('')||'<p style="color:var(--color-text-secondary);font-size:13px;margin-top:8px">No tasks</p>'}</div>`;
   else if(tab==='emails')dc.innerHTML=`<div style="margin-top:8px">${DB.emails.filter(e=>e.contactId===id).map(e=>`<div style="padding:8px 0;border-bottom:0.5px solid var(--color-border-tertiary)"><span style="font-weight:500">${e.subject}</span> <span class="badge ${e.direction==='Sent'?'badge-blue':'badge-green'}">${e.direction}</span><div style="font-size:11px;color:var(--color-text-secondary);margin-top:2px">${fmtDate(e.date)}</div></div>`).join('')||'<p style="color:var(--color-text-secondary);font-size:13px;margin-top:8px">No emails</p>'}</div>`;
 }
@@ -2114,6 +2142,328 @@ function simrpDashboardCard(){
     </div>
   </div>`;
 }
+// ── ROLLOVERS ──
+const ROLL_STAGES=['New opportunity','Fact-find','Recommendation presented','Client signed','Submitted','Transfer in progress','Funded','Lost'];
+const ROLL_STAGE_BG={'New opportunity':'#F1EFE8','Fact-find':'#E6F1FB','Recommendation presented':'#E6F1FB','Client signed':'#EEEDFE','Submitted':'#FAEEDA','Transfer in progress':'#FAEEDA','Funded':'#EAF3DE','Lost':'#FCEBEB'};
+const ROLL_OPEN_STAGES=['New opportunity','Fact-find','Recommendation presented','Client signed','Submitted','Transfer in progress'];
+const ROLL_WAIT_STAGES=['Submitted','Transfer in progress'];
+const ROLL_FROM_TYPES=['403(b)','457(b)','401(k)','401(a)','TRS refund','Traditional IRA','Roth IRA','Other'];
+const ROLL_INTO_TYPES=['Annuity','IRA','Other'];
+const ROLL_TPA=['Not needed','Pending','Approved'];
+const ROLL_PAPER=['Nothing yet','Client received it','Completed & returned'];
+const ROLL_STALL_DAYS=14;
+function rEsc(v){return (v==null?'':(''+v)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function rollToday(){return new Date().toISOString().slice(0,10);}
+function rollClient(r){if(r.contactId){const c=DB.contacts.find(x=>x.id===r.contactId);if(c)return c.name;}return r.clientName||'(no client)';}
+function rollDaysInStage(r){return r.stageChangedAt?Math.floor((Date.now()-r.stageChangedAt)/864e5):0;}
+function rollIsStalled(r){return ROLL_WAIT_STAGES.includes(r.stage)&&rollDaysInStage(r)>ROLL_STALL_DAYS;}
+function rollFormsOut(r){return ROLL_WAIT_STAGES.includes(r.stage)&&r.xferPaper==='Client received it';}
+function rollDaysTo(d){if(!d)return null;const t=new Date(rollToday()+'T12:00:00'),x=new Date(d+'T12:00:00');if(isNaN(x))return null;return Math.round((x-t)/864e5);}
+function normalizeRollovers(){
+  if(!Array.isArray(DB.rollovers)) DB.rollovers=[];
+  DB.rollovers.forEach(r=>{
+    if(!r.stage) r.stage='New opportunity';
+    ['contactId','clientName','fromType','fromCustodian','intoType','carrier','expectedClose','tpaStatus','paperDeadline','checkDate','fundedDate','lostReason'].forEach(k=>{if(r[k]===undefined)r[k]='';});
+    if(r.value===undefined) r.value='';
+    if(!r.xferPaper) r.xferPaper='Nothing yet';
+    if(r.checkSent===undefined) r.checkSent=false;
+    if(r.mailTaskCreated===undefined) r.mailTaskCreated=false;
+    if(r.mailTaskId===undefined) r.mailTaskId='';
+    if(!Array.isArray(r.activities)) r.activities=[];
+    if(!Array.isArray(r.notes)) r.notes=[];
+    if(!r.stageChangedAt) r.stageChangedAt=r.created||Date.now();
+  });
+}
+// Called whenever a rollover's stage actually changes (board, detail, or edit form)
+function rollOnStageChange(r,stage){
+  r.activities.push({date:rollToday(),type:'Stage',text:'→ '+stage});
+  r.stageChangedAt=Date.now();
+  if(stage==='Funded'&&!r.fundedDate) r.fundedDate=rollToday();
+  if(stage==='Submitted'&&!r.mailTaskCreated){
+    const due=new Date(Date.now()+3*864e5).toISOString().slice(0,10);
+    const from=r.fromCustodian||'their old company';
+    const tid=uid();
+    DB.tasks.push({id:tid,title:'Remind '+rollClient(r)+' to watch the mail for forms from '+from,contactId:r.contactId||'',due,priority:'High',done:false});
+    r.mailTaskCreated=true;r.mailTaskId=tid;
+    showToast('Task added: remind client to watch the mail','ok');
+  }
+  rollMaybeUpgrade(r);
+}
+// Signed paperwork = client. Bumps a linked Lead/Prospect to Client once a rollover reaches "Client signed" or later.
+const ROLL_SIGNED_IDX=ROLL_STAGES.indexOf('Client signed');
+function rollIsSigned(r){return r.stage!=='Lost'&&ROLL_STAGES.indexOf(r.stage)>=ROLL_SIGNED_IDX;}
+function rollMaybeUpgrade(r){
+  if(!r.contactId||!rollIsSigned(r))return false;
+  const c=DB.contacts.find(x=>x.id===r.contactId);if(!c)return false;
+  if(c.stage!=='Lead'&&c.stage!=='Prospect')return false;
+  const old=c.stage;c.stage='Client';
+  if(!c.clientSince)c.clientSince=rollToday();
+  if(!Array.isArray(c.activities))c.activities=[];
+  c.activities.push({date:rollToday(),type:'Note',text:'Category '+old+' → Client (rollover paperwork signed)'});
+  const auto=autoRunWorkflows('Client',c.id);
+  showToast(c.name+' is now a Client'+(auto?(' · '+auto+' workflow task'+(auto===1?'':'s')+' added'):''),'ok');
+  return true;
+}
+// ── Rollover client not in contacts yet ──
+let rollPendingLink=null;
+function rollPromptAddContact(rid){
+  const r=DB.rollovers.find(x=>x.id===rid);if(!r)return;
+  const signed=rollIsSigned(r);
+  showModal(`<div class="modal-header"><h2>Add to contacts?</h2><button class="btn btn-sm" onclick="closeModal()"><i class="ti ti-x"></i></button></div>
+  <div class="modal-body"><p style="font-size:13px;line-height:1.6"><strong>${rEsc(r.clientName)}</strong> isn't in your contacts yet. Add them now so this rollover shows on their record and its reminders are tied to them.</p>
+  <p style="font-size:12px;color:var(--color-text-secondary);margin-top:8px">They'll start as a <strong>${signed?'Client':'Prospect'}</strong>${signed?' since the paperwork is signed':''}. You can change that on the form.</p></div>
+  <div class="modal-footer"><button class="btn" onclick="closeModal()">Not now</button><button class="btn btn-primary" onclick="rollAddAsContact('${rid}')"><i class="ti ti-user-plus"></i> Add to contacts</button></div>`);
+}
+function rollAddAsContact(rid){
+  const r=DB.rollovers.find(x=>x.id===rid);if(!r)return;
+  const nm=(r.clientName||'').trim();
+  if(contactDraft&&contactDraft.name&&contactDraft.name.trim().toLowerCase()!==nm.toLowerCase()){
+    if(!confirm('You have an unsaved new contact in progress ('+contactDraft.name+'). Replace it with '+nm+'?'))return;
+    contactDraft=null;
+  }
+  const signed=rollIsSigned(r);
+  contactDraft=Object.assign(contactDraft||{children:[],interests:[],policies:[],custom:{}},{name:nm,stage:signed?'Client':'Prospect'});
+  if(signed&&!contactDraft.clientSince)contactDraft.clientSince=rollToday();
+  rollPendingLink=rid;
+  openContactModal();
+}
+// Called from saveContact: links the rollover that started this contact, plus any unlinked rollover with the same name.
+function rollLinkContact(c){
+  if(!c||!Array.isArray(DB.rollovers)){rollPendingLink=null;return null;}
+  const nm=(c.name||'').trim().toLowerCase();let n=0,pendingHit=null;
+  DB.rollovers.forEach(r=>{
+    if(r.contactId)return;
+    const isPending=r.id===rollPendingLink;
+    if(!isPending&&(r.clientName||'').trim().toLowerCase()!==nm)return;
+    r.contactId=c.id;r.clientName=c.name;
+    if(r.mailTaskId){const t=DB.tasks.find(x=>x.id===r.mailTaskId);if(t&&!t.contactId)t.contactId=c.id;}
+    r.activities.push({date:rollToday(),type:'Note',text:'Linked to contact '+c.name});
+    if(isPending)pendingHit=r.id;
+    n++;
+  });
+  rollPendingLink=null;
+  return n?{n,pendingHit}:null;
+}
+function rollCardFlags(r){
+  let h='';
+  if(rollFormsOut(r)){
+    const d=rollDaysTo(r.paperDeadline);
+    h+=`<div style="margin-top:6px"><span class="badge badge-red" style="font-size:10px"><i class="ti ti-alert-triangle"></i> Client forms out${d!=null?(d<0?' · overdue':' · due '+fmtMD(r.paperDeadline)):''}</span></div>`;
+  }
+  if(rollIsStalled(r)) h+=`<div style="margin-top:4px"><span class="badge badge-amber" style="font-size:10px"><i class="ti ti-hourglass"></i> ${rollDaysInStage(r)} days in stage</span></div>`;
+  if(r.stage==='Transfer in progress'){
+    const tpa=r.tpaStatus?`TPA: ${r.tpaStatus}`:'TPA: ?';
+    h+=`<div style="margin-top:4px;font-size:11px;color:var(--color-text-secondary)">${tpa}${r.checkSent?' · <span style="color:var(--color-text-success);font-weight:500">check sent</span>':''}</div>`;
+  }
+  return h;
+}
+function renderRollovers(){
+  const el=document.getElementById('page-rollovers');
+  const rs=DB.rollovers||[];
+  const open=rs.filter(r=>ROLL_OPEN_STAGES.includes(r.stage));
+  const openVal=open.reduce((a,r)=>a+snum(r.value),0);
+  const waiting=rs.filter(r=>ROLL_WAIT_STAGES.includes(r.stage)).length;
+  const yr=new Date().getFullYear()+'';
+  const fundedYr=rs.filter(r=>r.stage==='Funded'&&(r.fundedDate||'').slice(0,4)===yr);
+  const fundedVal=fundedYr.reduce((a,r)=>a+snum(r.value),0);
+  el.innerHTML=topbar('Rollovers',`<button class="btn btn-primary btn-sm" onclick="openRolloverModal()"><i class="ti ti-plus"></i> Add rollover</button>`)+`
+  <div class="content">
+    <div class="grid-4" style="margin-bottom:16px">
+      <div class="metric-card"><div class="metric-label"><i class="ti ti-arrows-exchange"></i> Open rollovers</div><div class="metric-value">${open.length}</div></div>
+      <div class="metric-card"><div class="metric-label"><i class="ti ti-coin"></i> Open pipeline value</div><div class="metric-value">${fmt(openVal)}</div></div>
+      <div class="metric-card"><div class="metric-label"><i class="ti ti-hourglass"></i> Waiting on companies</div><div class="metric-value">${waiting}</div></div>
+      <div class="metric-card"><div class="metric-label"><i class="ti ti-circle-check"></i> Funded in ${yr}</div><div class="metric-value">${fmt(fundedVal)} <span style="font-size:12px;color:var(--color-text-secondary)">(${fundedYr.length})</span></div></div>
+    </div>
+    ${rs.length?`<div class="pipeline">
+      ${ROLL_STAGES.map(stage=>{
+        const list=rs.filter(r=>r.stage===stage);
+        return`<div class="pipeline-col">
+          <div class="pipeline-header" style="background:${ROLL_STAGE_BG[stage]};color:#1a1a18"><span>${stage}</span><span style="font-size:11px;color:#5f5e5a">${list.length}</span></div>
+          ${list.map(r=>`<div class="deal-card" onclick="openRolloverDetail('${r.id}')">
+            <div style="font-size:13px;font-weight:500;margin-bottom:4px">${rEsc(rollClient(r))}</div>
+            <div style="font-size:11px;color:var(--color-text-secondary)">${rEsc(r.fromType||'?')}${r.fromCustodian?' ('+rEsc(r.fromCustodian)+')':''} → ${rEsc(r.intoType||'?')}${r.carrier?' · '+rEsc(r.carrier):''}</div>
+            ${snum(r.value)?`<div style="margin-top:6px;font-size:12px;color:var(--brand);font-weight:500">${fmt(snum(r.value))}</div>`:''}
+            ${rollCardFlags(r)}
+          </div>`).join('')}
+          <button class="btn btn-sm" style="width:100%;justify-content:center;color:var(--color-text-secondary);border-style:dashed" onclick="openRolloverModal('','${stage}')"><i class="ti ti-plus"></i> Add</button>
+        </div>`;
+      }).join('')}
+    </div>`:`<div class="card"><div class="empty-state"><i class="ti ti-arrows-exchange"></i><p>No rollovers yet.<br>Add one to start tracking it from first conversation to funded.</p><button class="btn btn-primary btn-sm" style="margin-top:12px" onclick="openRolloverModal()"><i class="ti ti-plus"></i> Add rollover</button></div></div>`}
+  </div>`;
+}
+function rollDatalist(id,field){const vals=[...new Set((DB.rollovers||[]).map(r=>(r[field]||'').trim()).filter(Boolean))].sort();return `<datalist id="${id}">${vals.map(v=>`<option value="${sattr(v)}"></option>`).join('')}</datalist>`;}
+function openRolloverModal(id='',defaultStage='New opportunity',prefillContactId=''){
+  const r=id?DB.rollovers.find(x=>x.id===id):{contactId:prefillContactId,intoType:'Annuity'};
+  const clientField=r.contactId?contactPickerHtml('r-client',r.contactId):(contactPickerHtml('r-client','').replace('value=""',`value="${sattr(r.clientName||'')}"`));
+  showModal(`<div class="modal-header"><h2>${id?'Edit rollover':'New rollover'}</h2><button class="btn btn-sm" onclick="closeModal()"><i class="ti ti-x"></i></button></div>
+  <div class="modal-body">
+    <div class="form-row"><div class="form-group" style="margin:0"><label>Client *</label>${clientField}</div>
+    <div class="form-group" style="margin:0"><label>Stage</label><select id="r-stage">${ROLL_STAGES.map(s=>`<option ${((r.stage||defaultStage)===s)?'selected':''}>${s}</option>`).join('')}</select></div></div>
+    <div style="font-size:11px;color:var(--color-text-tertiary);margin:-4px 0 10px">Pick an existing contact so this shows on their record. A name that isn't a contact still saves.</div>
+
+    <div class="modal-section-title" style="border-top:0.5px solid var(--color-border-tertiary);padding-top:12px">Rolling from</div>
+    <div class="form-row"><div class="form-group" style="margin:0"><label>Account type</label><select id="r-from-type"><option value="">—</option>${ROLL_FROM_TYPES.map(t=>`<option ${r.fromType===t?'selected':''}>${t}</option>`).join('')}</select></div>
+    <div class="form-group" style="margin:0"><label>Current company (transferring)</label><input id="r-from-cust" list="r-cust-dl" value="${sattr(r.fromCustodian)}" placeholder="e.g. Corebridge, Equitable"/>${rollDatalist('r-cust-dl','fromCustodian')}</div></div>
+    <div class="form-group"><label>Estimated value</label><input id="r-value" type="number" step="0.01" value="${(r.value===''||r.value==null)?'':r.value}" placeholder="$"/></div>
+
+    <div class="modal-section-title" style="border-top:0.5px solid var(--color-border-tertiary);padding-top:12px">Rolling into</div>
+    <div class="form-row"><div class="form-group" style="margin:0"><label>Product</label><select id="r-into-type">${ROLL_INTO_TYPES.map(t=>`<option ${((r.intoType||'Annuity')===t)?'selected':''}>${t}</option>`).join('')}</select></div>
+    <div class="form-group" style="margin:0"><label>Carrier (receiving)</label><input id="r-carrier" list="r-carrier-dl" value="${sattr(r.carrier)}" placeholder="Receiving company"/>${rollDatalist('r-carrier-dl','carrier')}</div></div>
+    <div class="form-group"><label>Expected close</label><input id="r-close" type="date" value="${sattr(r.expectedClose)}"/></div>
+
+    <div class="modal-section-title" style="border-top:0.5px solid var(--color-border-tertiary);padding-top:12px">If lost</div>
+    <div class="form-group"><label>Lost reason <span style="color:var(--color-text-tertiary)">(optional)</span></label><input id="r-lost" value="${sattr(r.lostReason)}" placeholder="e.g. conserved by old company, changed mind"/></div>
+    ${id?'':`<div class="form-group"><label>First note <span style="color:var(--color-text-tertiary)">(optional)</span></label><textarea id="r-first-note" style="height:60px" placeholder="Anything worth remembering..."></textarea></div>`}
+  </div>
+  <div class="modal-footer"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="saveRollover('${id}')">Save</button></div>`);
+}
+function saveRollover(id){
+  const clientName=document.getElementById('r-client').value.trim();
+  if(!clientName){alert('Client name required.');return;}
+  const stage=document.getElementById('r-stage').value;
+  const data={
+    contactId:contactIdByName(clientName),
+    clientName,
+    fromType:document.getElementById('r-from-type').value,
+    fromCustodian:document.getElementById('r-from-cust').value.trim(),
+    value:parseFloat(document.getElementById('r-value').value)||'',
+    intoType:document.getElementById('r-into-type').value,
+    carrier:document.getElementById('r-carrier').value.trim(),
+    expectedClose:document.getElementById('r-close').value,
+    lostReason:document.getElementById('r-lost').value.trim()
+  };
+  let r;
+  if(id){
+    r=DB.rollovers.find(x=>x.id===id);
+    Object.assign(r,data);
+    if(r.stage!==stage){r.stage=stage;rollOnStageChange(r,stage);}
+  }else{
+    r={id:uid(),...data,stage:'New opportunity',tpaStatus:'',xferPaper:'Nothing yet',paperDeadline:'',checkSent:false,checkDate:'',fundedDate:'',mailTaskCreated:false,activities:[],notes:[],created:Date.now(),stageChangedAt:Date.now()};
+    const n=(document.getElementById('r-first-note')||{}).value;
+    if(n&&n.trim()) r.notes.push({date:rollToday(),text:n.trim()});
+    DB.rollovers.push(r);
+    r.activities.push({date:rollToday(),type:'Stage',text:'Created'});
+    if(stage!=='New opportunity'){r.stage=stage;rollOnStageChange(r,stage);}
+  }
+  rollMaybeUpgrade(r);
+  save();rollRefresh();
+  if(!id&&!r.contactId)rollPromptAddContact(r.id);else closeModal();
+}
+function rollRefresh(){
+  const pg=document.getElementById('page-rollovers');if(pg&&pg.style.display!=='none')renderRollovers();
+  const db=document.getElementById('page-dashboard');if(db&&db.style.display!=='none')renderDashboard();
+}
+function rollChecklistHtml(r){
+  const id=r.id;
+  const sel=(field,opts,blank)=>`<select onchange="rollSetField('${id}','${field}',this.value)" style="width:auto;padding:4px 8px">${blank?`<option value="">${blank}</option>`:''}${opts.map(o=>`<option ${r[field]===o?'selected':''}>${o}</option>`).join('')}</select>`;
+  const d=rollDaysTo(r.paperDeadline);
+  const urgent=rollFormsOut(r);
+  return `<div style="background:${urgent?'var(--color-background-danger)':'var(--color-background-secondary)'};border-radius:8px;padding:12px;margin-bottom:14px">
+    <div style="font-size:13px;font-weight:600;margin-bottom:10px;${urgent?'color:var(--color-text-danger)':''}"><i class="ti ti-list-check"></i> Transfer checklist${urgent?' · client has forms to complete!':''}</div>
+    <div style="display:grid;grid-template-columns:auto 1fr;gap:8px 12px;align-items:center;font-size:12px">
+      <span style="color:var(--color-text-secondary)">TPA sign-off</span><div>${sel('tpaStatus',ROLL_TPA,'— not sure yet —')}</div>
+      <span style="color:var(--color-text-secondary)">Old company's forms to client</span><div>${sel('xferPaper',ROLL_PAPER)}</div>
+      <span style="color:var(--color-text-secondary)">Forms deadline</span><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><input type="date" value="${sattr(r.paperDeadline)}" onchange="rollSetField('${id}','paperDeadline',this.value)" style="width:auto;padding:4px 8px"/>${d!=null?`<span style="font-weight:500;color:${d<=3?'var(--color-text-danger)':'var(--color-text-secondary)'}">${d<0?'overdue by '+(-d)+' day'+(d===-1?'':'s'):(d===0?'due today':'in '+d+' day'+(d===1?'':'s'))}</span>`:''}</div>
+      <span style="color:var(--color-text-secondary)">Check sent</span><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><label class="chk"><input type="checkbox" ${r.checkSent?'checked':''} onchange="rollSetCheck('${id}',this.checked)"/> Yes</label>${r.checkSent?`<input type="date" value="${sattr(r.checkDate)}" onchange="rollSetField('${id}','checkDate',this.value)" style="width:auto;padding:4px 8px"/>`:''}</div>
+    </div>
+    <div style="font-size:11px;color:var(--color-text-tertiary);margin-top:8px">Changes save automatically and show up in the activity log.</div>
+  </div>`;
+}
+const ROLL_FIELD_LABEL={tpaStatus:'TPA sign-off',xferPaper:"Old company's forms",paperDeadline:'Forms deadline',checkDate:'Check date'};
+function rollSetField(id,field,value){
+  const r=DB.rollovers.find(x=>x.id===id);if(!r)return;
+  if(r[field]===value)return;
+  r[field]=value;
+  const shown=(field==='paperDeadline'||field==='checkDate')?(value?fmtDate(value):'cleared'):(value||'not set');
+  r.activities.push({date:rollToday(),type:'Checklist',text:ROLL_FIELD_LABEL[field]+' → '+shown});
+  save();openRolloverDetail(id);rollRefresh();
+}
+function rollSetCheck(id,on){
+  const r=DB.rollovers.find(x=>x.id===id);if(!r)return;
+  r.checkSent=on;if(on&&!r.checkDate)r.checkDate=rollToday();
+  r.activities.push({date:rollToday(),type:'Checklist',text:on?'Check sent to receiving company':'Check sent → unchecked'});
+  save();openRolloverDetail(id);rollRefresh();
+}
+function openRolloverDetail(id){
+  const r=DB.rollovers.find(x=>x.id===id);if(!r)return;
+  const info=(lbl,val)=>`<div class="info-item"><span class="lbl">${lbl}</span>${val||'—'}</div>`;
+  const clientHtml=r.contactId&&DB.contacts.find(c=>c.id===r.contactId)?`<a class="gcal" style="cursor:pointer" onclick="closeModal();openContactDetail('${r.contactId}')">${rEsc(rollClient(r))}</a>`:`${rEsc(rollClient(r))}<div style="margin-top:6px"><button class="btn btn-sm" onclick="rollAddAsContact('${id}')"><i class="ti ti-user-plus"></i> Add to contacts</button></div>`;
+  const showChecklist=ROLL_WAIT_STAGES.includes(r.stage)||r.stage==='Funded';
+  showModal(`<div class="modal-header"><h2>Rollover · ${rEsc(rollClient(r))}</h2><button class="btn btn-sm" onclick="closeModal()"><i class="ti ti-x"></i></button></div>
+  <div class="modal-body">
+    <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:12px">
+      <span class="badge" style="background:${ROLL_STAGE_BG[r.stage]};color:#1a1a18">${r.stage}</span>
+      <span style="font-size:12px;color:var(--color-text-secondary)">${rollDaysInStage(r)} day${rollDaysInStage(r)===1?'':'s'} in this stage</span>
+      ${rollIsStalled(r)?'<span class="badge badge-amber"><i class="ti ti-hourglass"></i> stalled</span>':''}
+    </div>
+    <div class="grid-2" style="gap:10px;margin-bottom:14px">
+      <div class="metric-card"><div class="metric-label">Estimated value</div><div class="metric-value" style="font-size:18px">${snum(r.value)?fmt(snum(r.value)):'—'}</div></div>
+      <div class="metric-card"><div class="metric-label">Expected close</div><div class="metric-value" style="font-size:18px">${r.expectedClose?fmtDate(r.expectedClose):'—'}</div></div>
+    </div>
+
+    <div style="font-size:13px;font-weight:500;margin-bottom:8px">Move stage</div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px">${ROLL_STAGES.map(s=>`<button class="btn btn-sm ${r.stage===s?'btn-primary':''}" onclick="rollMove('${id}','${s}')">${s}</button>`).join('')}</div>
+
+    ${showChecklist?rollChecklistHtml(r):''}
+
+    <div class="modal-section"><div class="modal-section-title">Details</div>
+      <div class="info-grid">
+        ${info('Client',clientHtml)}
+        ${info('Rolling from',[rEsc(r.fromType),rEsc(r.fromCustodian)].filter(Boolean).join(' · '))}
+        ${info('Rolling into',[rEsc(r.intoType),rEsc(r.carrier)].filter(Boolean).join(' · '))}
+        ${r.stage==='Funded'?info('Funded',r.fundedDate?fmtDate(r.fundedDate):''):''}
+        ${r.stage==='Lost'?info('Lost reason',rEsc(r.lostReason)):''}
+      </div>
+    </div>
+
+    <div class="modal-section"><div class="modal-section-title">Activity</div>
+      ${(r.activities||[]).slice().reverse().map(a=>`<div class="note-item"><div class="note-date">${fmtDate(a.date)} · ${a.type||'Note'}</div><div style="font-size:13px">${rEsc(a.text)}</div></div>`).join('')||'<p style="font-size:13px;color:var(--color-text-secondary);margin-bottom:8px">No activity logged yet.</p>'}
+      <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap"><select id="r-act-type" style="max-width:150px">${['Call','Meeting','Email','Paperwork','Note'].map(t=>`<option>${t}</option>`).join('')}</select><input id="r-act-text" placeholder="What happened / next step..." style="flex:1;min-width:140px"/><button class="btn btn-primary btn-sm" onclick="rollAddActivity('${id}')">Add</button></div>
+    </div>
+
+    <div class="modal-section"><div class="modal-section-title">Notes</div>
+      ${(r.notes||[]).map(n=>`<div class="note-item"><div class="note-date">${fmtDate(n.date)}</div><div style="font-size:13px">${rEsc(n.text)}</div></div>`).join('')||'<p style="font-size:13px;color:var(--color-text-secondary);margin-bottom:8px">No notes.</p>'}
+      <div style="display:flex;gap:8px;margin-top:8px"><textarea id="r-note" placeholder="Add a note..." style="height:60px;flex:1"></textarea><button class="btn btn-primary btn-sm" style="align-self:flex-end" onclick="rollAddNote('${id}')">Add</button></div>
+    </div>
+  </div>
+  <div class="modal-footer">${r.contactId?`<button class="btn" onclick="openTaskModal('','${r.contactId}')"><i class="ti ti-plus"></i> Add task</button>`:''}<button class="btn" onclick="openRolloverModal('${id}')"><i class="ti ti-edit"></i> Edit</button><button class="btn btn-danger" onclick="rollDelete('${id}')"><i class="ti ti-trash"></i> Delete</button></div>`);
+}
+function rollMove(id,stage){const r=DB.rollovers.find(x=>x.id===id);if(!r)return;if(r.stage!==stage){r.stage=stage;rollOnStageChange(r,stage);}save();openRolloverDetail(id);rollRefresh();}
+function rollAddActivity(id){const t=document.getElementById('r-act-text').value.trim();if(!t)return;const r=DB.rollovers.find(x=>x.id===id);r.activities.push({date:rollToday(),type:document.getElementById('r-act-type').value,text:t});save();openRolloverDetail(id);}
+function rollAddNote(id){const t=document.getElementById('r-note').value.trim();if(!t)return;const r=DB.rollovers.find(x=>x.id===id);r.notes.push({date:rollToday(),text:t});save();openRolloverDetail(id);}
+function rollDelete(id){if(!confirm('Delete this rollover record?'))return;DB.rollovers=DB.rollovers.filter(x=>x.id!==id);save();closeModal();rollRefresh();}
+function rolloverDashboardCard(){
+  const rs=DB.rollovers||[];if(!rs.length)return'';
+  const forms=rs.filter(rollFormsOut).sort((a,b)=>(a.paperDeadline||'9999').localeCompare(b.paperDeadline||'9999'));
+  const stalled=rs.filter(r=>rollIsStalled(r)&&!rollFormsOut(r)).sort((a,b)=>a.stageChangedAt-b.stageChangedAt);
+  if(!forms.length&&!stalled.length)return'';
+  const go=r=>`showPage('rollovers');setTimeout(()=>openRolloverDetail('${r.id}'),60)`;
+  const formRow=r=>{const d=rollDaysTo(r.paperDeadline);const when=d==null?'no deadline set':(d<0?'overdue':(d===0?'due today':'due in '+d+'d'));return `<div class="alert-row" onclick="${go(r)}">
+    <div class="alert-icon" style="background:#FCEBEB;color:#A32D2D"><i class="ti ti-alert-triangle"></i></div>
+    <div style="min-width:0"><div style="font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${rEsc(rollClient(r))}</div><div style="font-size:11px;color:var(--color-text-secondary)">Forms from ${rEsc(r.fromCustodian||'old company')}${r.paperDeadline?' · '+fmtMD(r.paperDeadline):''}</div></div>
+    <span class="alert-when" style="color:var(--color-text-danger);font-weight:600">${when}</span>
+  </div>`;};
+  const stallRow=r=>`<div class="alert-row" onclick="${go(r)}">
+    <div class="alert-icon" style="background:#FAEEDA;color:#854F0B"><i class="ti ti-hourglass"></i></div>
+    <div style="min-width:0"><div style="font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${rEsc(rollClient(r))}</div><div style="font-size:11px;color:var(--color-text-secondary)">${r.stage}${r.fromCustodian?' · '+rEsc(r.fromCustodian):''}</div></div>
+    <span class="alert-when" style="color:var(--color-text-warning)">${rollDaysInStage(r)} days</span>
+  </div>`;
+  return `<div class="grid-2" style="gap:16px;margin-bottom:16px">
+    <div class="card" style="${forms.length?'border:1.5px solid var(--color-text-danger)':''}">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px"><span style="font-size:13px;font-weight:600;${forms.length?'color:var(--color-text-danger)':''}"><i class="ti ti-alert-triangle" style="margin-right:5px"></i>Rollover forms waiting on clients</span>${forms.length?`<span class="badge badge-red">${forms.length}</span>`:''}</div>
+      ${forms.length?forms.map(formRow).join(''):'<div class="empty-state" style="padding:20px 0"><i class="ti ti-circle-check"></i>No client forms outstanding</div>'}
+    </div>
+    <div class="card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px"><span style="font-size:13px;font-weight:500"><i class="ti ti-hourglass" style="color:#854F0B;margin-right:5px"></i>Stalled rollovers</span><span style="font-size:11px;color:var(--color-text-tertiary)">${ROLL_STALL_DAYS}+ days waiting</span></div>
+      ${stalled.length?stalled.map(stallRow).join(''):'<div class="empty-state" style="padding:20px 0"><i class="ti ti-circle-check"></i>Nothing stalled</div>'}
+    </div>
+  </div>`;
+}
+function rollContactTabHtml(cid){
+  const list=(DB.rollovers||[]).filter(r=>r.contactId===cid);
+  return `<div style="margin-top:8px">${list.map(r=>`<div style="padding:8px 0;border-bottom:0.5px solid var(--color-border-tertiary);cursor:pointer" onclick="openRolloverDetail('${r.id}')"><span style="font-weight:500">${rEsc(r.fromType||'Rollover')}${r.fromCustodian?' · '+rEsc(r.fromCustodian):''} → ${rEsc(r.intoType||'')}</span> <span class="badge" style="background:${ROLL_STAGE_BG[r.stage]};color:#1a1a18">${r.stage}</span>${rollFormsOut(r)?' <span class="badge badge-red">forms out</span>':''}<span style="float:right;font-weight:500;color:var(--color-text-info)">${snum(r.value)?fmt(snum(r.value)):''}</span></div>`).join('')||'<p style="color:var(--color-text-secondary);font-size:13px;margin-top:8px">No rollovers</p>'}
+  <button class="btn btn-sm" style="margin-top:10px" onclick="openRolloverModal('','New opportunity','${cid}')"><i class="ti ti-plus"></i> Add rollover</button></div>`;
+}
 function renderGuide(){
   const el=document.getElementById('page-guide');
   const gsec=(icon,title,body)=>`<div class="card" style="margin-bottom:14px"><div style="font-size:14px;font-weight:600;margin-bottom:8px"><i class="ti ${icon}" style="color:var(--brand);margin-right:6px"></i>${title}</div><div style="font-size:13px;line-height:1.65;color:var(--color-text-primary)">${body}</div></div>`;
@@ -2150,6 +2500,10 @@ function renderGuide(){
       <strong>Compensation.</strong> On each plan you set who gets what per participating employee per month (check "Me" for your share). The page then shows your <strong>monthly and annual recurring</strong> and what each referral partner is owed — your live ROI.<br><br>
       <strong>Enrollment forms.</strong> Open any organization → <em>Enrollment form</em> → pick <strong>SIMRP only</strong> or <strong>SIMRP + 401(a)</strong>. It fills in the district name and gives you a print-ready form to Print or Save as PDF. Set the district's links (Savings Report, Participation Summary, etc.) once under <em>Resources &amp; forms</em>.`)}
 
+    ${gsec('ti-arrows-exchange','Rollovers',`Every rollover gets a card on the <strong>Rollovers</strong> board, from first conversation to funded. Link it to the client's contact and it shows up on their record under a Rollovers tab. If the client isn't in your contacts yet, the CRM offers to add them on the spot, and a contact you add later with the same name links up automatically.<br><br>
+      <strong>Signed = client:</strong> once a rollover reaches <em>Client signed</em>, a linked contact who is still a Lead or Prospect becomes a Client automatically, with today as their client-since date if none is set.<br><br>
+      <strong>The waiting game:</strong> once a rollover is <em>Submitted</em> or <em>Transfer in progress</em>, open it to find the <strong>Transfer checklist</strong>: TPA sign-off, whether the old company has sent the client forms, the forms deadline, and whether the check has gone out. Changes save automatically and land in the activity log.<br><br>
+      <strong>Built-in nudges:</strong> moving a rollover to <em>Submitted</em> automatically adds a task to remind the client to watch their mail. The Dashboard shows a red card for any client sitting on forms from the old company, plus a list of rollovers that have been waiting more than 14 days.`)}
     ${gsec('ti-send','Campaigns',`
       Under <strong>Campaigns</strong>, pick a message template, narrow the audience (category, product owned, market, age), preview who it hits, and export the list as a CSV for your mail-merge. Send from Gmail as your XO address. Think of the CRM as the brain that builds the list; the sending happens in your email tool.`)}
 
