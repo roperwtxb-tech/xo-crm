@@ -2169,10 +2169,13 @@ function normalizeRollovers(){
     if(r.checkSent===undefined) r.checkSent=false;
     if(r.mailTaskCreated===undefined) r.mailTaskCreated=false;
     if(r.mailTaskId===undefined) r.mailTaskId='';
+    ['requestSentDate','checkTaskId','letterTaskId'].forEach(k=>{if(r[k]===undefined)r[k]='';});
+    if(r.checkTaskCreated===undefined) r.checkTaskCreated=false;
     if(!Array.isArray(r.activities)) r.activities=[];
     if(!Array.isArray(r.notes)) r.notes=[];
     if(!r.stageChangedAt) r.stageChangedAt=r.created||Date.now();
   });
+  normalizeRollForms();
 }
 // Called whenever a rollover's stage actually changes (board, detail, or edit form)
 function rollOnStageChange(r,stage){
@@ -2187,8 +2190,30 @@ function rollOnStageChange(r,stage){
     r.mailTaskCreated=true;r.mailTaskId=tid;
     showToast('Task added: remind client to watch the mail','ok');
   }
+  if(stage==='Submitted'&&!r.checkTaskCreated&&!r.requestSentDate){
+    const days=Number((DB.rollLetter||{}).checkDays)||3;
+    const cid=uid(), carrier=r.carrier||'the receiving company';
+    DB.tasks.push({id:cid,title:'Check '+carrier+' portal: has '+rollClient(r)+"'s transfer request gone to "+(r.fromCustodian||'the old company')+'?',contactId:r.contactId||'',due:new Date(Date.now()+days*864e5).toISOString().slice(0,10),priority:'Medium',done:false});
+    r.checkTaskCreated=true;r.checkTaskId=cid;
+  }
+  if(stage==='Transfer in progress'&&!r.requestSentDate) rollMarkRequestSent(r,true);
   rollMaybeUpgrade(r);
 }
+// Receiving company has sent the transfer request to the old company -> time to mail Sean's letter
+function rollMarkRequestSent(r,fromStageChange){
+  r.requestSentDate=rollToday();
+  r.activities.push({date:rollToday(),type:'Checklist',text:'Transfer request confirmed sent to '+(r.fromCustodian||'old company')});
+  if(r.checkTaskId){const t=DB.tasks.find(x=>x.id===r.checkTaskId);if(t)t.done=true;}
+  if(!r.letterMailed&&!r.letterTaskId){
+    const lid=uid();
+    DB.tasks.push({id:lid,title:'Mail transfer letter to '+rollCoName(r.fromCustodian||'the old company')+' ('+rollClient(r)+')',contactId:r.contactId||'',due:rollToday(),priority:'High',done:false});
+    r.letterTaskId=lid;
+    showToast('Task added: mail the transfer letter','ok');
+  }
+  if(!fromStageChange&&r.stage==='Submitted'){r.stage='Transfer in progress';rollOnStageChange(r,'Transfer in progress');}
+}
+function rollRequestSentClick(id){const r=DB.rollovers.find(x=>x.id===id);if(!r)return;rollMarkRequestSent(r,false);save();openRolloverDetail(id);rollRefresh();}
+function rollClearRequestSent(id){const r=DB.rollovers.find(x=>x.id===id);if(!r)return;r.requestSentDate='';r.activities.push({date:rollToday(),type:'Checklist',text:'Request-sent date cleared'});save();openRolloverDetail(id);}
 // Signed paperwork = client. Bumps a linked Lead/Prospect to Client once a rollover reaches "Client signed" or later.
 const ROLL_SIGNED_IDX=ROLL_STAGES.indexOf('Client signed');
 function rollIsSigned(r){return r.stage!=='Lost'&&ROLL_STAGES.indexOf(r.stage)>=ROLL_SIGNED_IDX;}
@@ -2266,7 +2291,7 @@ function renderRollovers(){
   const yr=new Date().getFullYear()+'';
   const fundedYr=rs.filter(r=>r.stage==='Funded'&&(r.fundedDate||'').slice(0,4)===yr);
   const fundedVal=fundedYr.reduce((a,r)=>a+snum(r.value),0);
-  el.innerHTML=topbar('Rollovers',`<button class="btn btn-primary btn-sm" onclick="openRolloverModal()"><i class="ti ti-plus"></i> Add rollover</button>`)+`
+  el.innerHTML=topbar('Rollovers',`<button class="btn btn-sm" onclick="rollPrintLetter('')" title="Print a blank client transfer letter"><i class="ti ti-printer"></i> Blank letter</button> <button class="btn btn-sm" onclick="openRollLetterSettings()" title="Your info printed on the letter"><i class="ti ti-id-badge"></i> Letter info</button> <button class="btn btn-primary btn-sm" onclick="openRolloverModal()"><i class="ti ti-plus"></i> Add rollover</button>`)+`
   <div class="content">
     <div class="grid-4" style="margin-bottom:16px">
       <div class="metric-card"><div class="metric-label"><i class="ti ti-arrows-exchange"></i> Open rollovers</div><div class="metric-value">${open.length}</div></div>
@@ -2289,11 +2314,12 @@ function renderRollovers(){
         </div>`;
       }).join('')}
     </div>`:`<div class="card"><div class="empty-state"><i class="ti ti-arrows-exchange"></i><p>No rollovers yet.<br>Add one to start tracking it from first conversation to funded.</p><button class="btn btn-primary btn-sm" style="margin-top:12px" onclick="openRolloverModal()"><i class="ti ti-plus"></i> Add rollover</button></div></div>`}
+    ${rollFormsLibraryHtml()}
   </div>`;
 }
 function rollDatalist(id,field){const vals=[...new Set((DB.rollovers||[]).map(r=>(r[field]||'').trim()).filter(Boolean))].sort();return `<datalist id="${id}">${vals.map(v=>`<option value="${sattr(v)}"></option>`).join('')}</datalist>`;}
 function openRolloverModal(id='',defaultStage='New opportunity',prefillContactId=''){
-  const r=id?DB.rollovers.find(x=>x.id===id):{contactId:prefillContactId,intoType:'Annuity'};
+  const r=id?DB.rollovers.find(x=>x.id===id):{contactId:prefillContactId,intoType:'Annuity',carrier:'National Life Group'};
   const clientField=r.contactId?contactPickerHtml('r-client',r.contactId):(contactPickerHtml('r-client','').replace('value=""',`value="${sattr(r.clientName||'')}"`));
   showModal(`<div class="modal-header"><h2>${id?'Edit rollover':'New rollover'}</h2><button class="btn btn-sm" onclick="closeModal()"><i class="ti ti-x"></i></button></div>
   <div class="modal-body">
@@ -2338,7 +2364,7 @@ function saveRollover(id){
     Object.assign(r,data);
     if(r.stage!==stage){r.stage=stage;rollOnStageChange(r,stage);}
   }else{
-    r={id:uid(),...data,stage:'New opportunity',tpaStatus:'',xferPaper:'Nothing yet',paperDeadline:'',checkSent:false,checkDate:'',fundedDate:'',mailTaskCreated:false,activities:[],notes:[],created:Date.now(),stageChangedAt:Date.now()};
+    r={id:uid(),...data,stage:'New opportunity',tpaStatus:'',xferPaper:'Nothing yet',paperDeadline:'',checkSent:false,checkDate:'',fundedDate:'',mailTaskCreated:false,requestSentDate:'',checkTaskCreated:false,checkTaskId:'',letterTaskId:'',letterMailed:false,letterMailedDate:'',activities:[],notes:[],created:Date.now(),stageChangedAt:Date.now()};
     const n=(document.getElementById('r-first-note')||{}).value;
     if(n&&n.trim()) r.notes.push({date:rollToday(),text:n.trim()});
     DB.rollovers.push(r);
@@ -2361,6 +2387,7 @@ function rollChecklistHtml(r){
   return `<div style="background:${urgent?'var(--color-background-danger)':'var(--color-background-secondary)'};border-radius:8px;padding:12px;margin-bottom:14px">
     <div style="font-size:13px;font-weight:600;margin-bottom:10px;${urgent?'color:var(--color-text-danger)':''}"><i class="ti ti-list-check"></i> Transfer checklist${urgent?' · client has forms to complete!':''}</div>
     <div style="display:grid;grid-template-columns:auto 1fr;gap:8px 12px;align-items:center;font-size:12px">
+      <span style="color:var(--color-text-secondary)">Request sent to ${rEsc(rollCoName(r.fromCustodian)||'old company')}</span><div>${r.requestSentDate?`<span style="color:var(--color-text-success);font-weight:500">✓ ${fmtDate(r.requestSentDate)}</span> <a class="gcal" style="cursor:pointer;font-size:11px" onclick="rollClearRequestSent('${id}')">clear</a>`:`<button class="btn btn-sm" onclick="rollRequestSentClick('${id}')"><i class="ti ti-send"></i> Mark as sent</button> <span style="font-size:11px;color:var(--color-text-tertiary)">once the ${rEsc(r.carrier||'receiving company')} portal shows it went out</span>`}</div>
       <span style="color:var(--color-text-secondary)">TPA sign-off</span><div>${sel('tpaStatus',ROLL_TPA,'— not sure yet —')}</div>
       <span style="color:var(--color-text-secondary)">Old company's forms to client</span><div>${sel('xferPaper',ROLL_PAPER)}</div>
       <span style="color:var(--color-text-secondary)">Forms deadline</span><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><input type="date" value="${sattr(r.paperDeadline)}" onchange="rollSetField('${id}','paperDeadline',this.value)" style="width:auto;padding:4px 8px"/>${d!=null?`<span style="font-weight:500;color:${d<=3?'var(--color-text-danger)':'var(--color-text-secondary)'}">${d<0?'overdue by '+(-d)+' day'+(d===-1?'':'s'):(d===0?'due today':'in '+d+' day'+(d===1?'':'s'))}</span>`:''}</div>
@@ -2405,6 +2432,8 @@ function openRolloverDetail(id){
     <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px">${ROLL_STAGES.map(s=>`<button class="btn btn-sm ${r.stage===s?'btn-primary':''}" onclick="rollMove('${id}','${s}')">${s}</button>`).join('')}</div>
 
     ${showChecklist?rollChecklistHtml(r):''}
+
+    ${r.stage!=='Lost'?rollPaperworkHtml(r):''}
 
     <div class="modal-section"><div class="modal-section-title">Details</div>
       <div class="info-grid">
@@ -2464,6 +2493,169 @@ function rollContactTabHtml(cid){
   return `<div style="margin-top:8px">${list.map(r=>`<div style="padding:8px 0;border-bottom:0.5px solid var(--color-border-tertiary);cursor:pointer" onclick="openRolloverDetail('${r.id}')"><span style="font-weight:500">${rEsc(r.fromType||'Rollover')}${r.fromCustodian?' · '+rEsc(r.fromCustodian):''} → ${rEsc(r.intoType||'')}</span> <span class="badge" style="background:${ROLL_STAGE_BG[r.stage]};color:#1a1a18">${r.stage}</span>${rollFormsOut(r)?' <span class="badge badge-red">forms out</span>':''}<span style="float:right;font-weight:500;color:var(--color-text-info)">${snum(r.value)?fmt(snum(r.value)):''}</span></div>`).join('')||'<p style="color:var(--color-text-secondary);font-size:13px;margin-top:8px">No rollovers</p>'}
   <button class="btn btn-sm" style="margin-top:10px" onclick="openRolloverModal('','New opportunity','${cid}')"><i class="ti ti-plus"></i> Add rollover</button></div>`;
 }
+// ── ROLLOVER PAPERWORK: company forms library + client transfer letter ──
+function rollFormKey(n){return (n||'').trim().toLowerCase().replace(/\s+/g,' ');}
+function normalizeRollForms(){
+  if(!DB.rollForms||typeof DB.rollForms!=='object'){
+    DB.rollForms={'equitable':{name:'Equitable',notes:'',links:[{label:'Transfer paperwork',url:'https://1drv.ms/b/c/b84442349a26172c/IQD92TtSNFXiRZt4UkgYhzGsAcI9Kui72pWfFYzpX1505kE?e=xIRfMS'}]}};
+  }
+  Object.keys(DB.rollForms).forEach(k=>{const f=DB.rollForms[k];if(!f.name)f.name=k;if(f.notes===undefined)f.notes='';if(!Array.isArray(f.links))f.links=[];});
+  const meName=(CURRENT_USER&&USERS[CURRENT_USER])?USERS[CURRENT_USER].name:'';
+  if(!DB.rollLetter||typeof DB.rollLetter!=='object') DB.rollLetter={advisor:meName,firm:'XO Financial',phone:'(254) 735-1900',email:'sroper@xofinancial.com'};
+  if(!DB.rollLetter.checkDays) DB.rollLetter.checkDays=3;
+  (DB.rollovers||[]).forEach(r=>{
+    if(r.clientHasForms===undefined)r.clientHasForms=false;
+    if(r.clientHasFormsDate===undefined)r.clientHasFormsDate='';
+    if(r.letterSigned===undefined)r.letterSigned=false;
+    if(r.letterSignedDate===undefined)r.letterSignedDate='';
+    if(r.letterMailed===undefined)r.letterMailed=false;
+    if(r.letterMailedDate===undefined)r.letterMailedDate='';
+  });
+}
+function rollFormsFor(company){return (DB.rollForms||{})[rollFormKey(company)]||null;}
+function rollCoName(company){const f=rollFormsFor(company);return f?f.name:(company||'').trim();}
+function rollFormLinksHtml(f,small){
+  if(!f||!f.links.length)return '';
+  return f.links.filter(l=>l.url).map(l=>`<a class="btn btn-sm" href="${sattr(l.url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()"${small?' style="font-size:11px;padding:3px 8px"':''}><i class="ti ti-file-text"></i> ${rEsc(l.label||'Form')}</a>`).join(' ');
+}
+// Paperwork section shown inside a rollover's detail view
+function rollPaperworkHtml(r){
+  const id=r.id, co=(r.fromCustodian||'').trim();
+  const f=co?rollFormsFor(co):null;
+  let formsPart;
+  if(!co) formsPart=`<div style="font-size:12px;color:var(--color-text-secondary)">Add the transferring company (Edit) to see its forms here.</div>`;
+  else if(f&&(f.links.length||f.notes)) formsPart=`<div style="font-size:12px;color:var(--color-text-secondary);margin-bottom:6px">${rEsc(f.name)} paperwork on file:</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px">${rollFormLinksHtml(f)} <button class="btn btn-sm" onclick="openRollFormModal('${sattr(rollFormKey(co))}','${id}')"><i class="ti ti-edit"></i> Edit</button></div>
+      ${f.notes?`<div style="font-size:12px;margin-top:8px;padding:8px;background:var(--color-background-secondary);border-radius:6px"><i class="ti ti-info-circle"></i> ${rEsc(f.notes)}</div>`:''}`;
+  else formsPart=`<div style="font-size:12px;color:var(--color-text-secondary)">No paperwork saved for ${rEsc(co)} yet. <a class="gcal" style="cursor:pointer" onclick="openRollFormModal('${sattr(rollFormKey(co))}','${id}','${sattr(co)}')">+ Add ${rEsc(co)}'s forms</a></div>`;
+  const chk=(field,dateField,label)=>`<label class="chk" style="display:flex;gap:6px;align-items:center;font-size:12px"><input type="checkbox" ${r[field]?'checked':''} onchange="rollSetPaper('${id}','${field}','${dateField}',this.checked)"/> ${label}${r[field]&&r[dateField]?` <span style="color:var(--color-text-tertiary)">· ${fmtDate(r[dateField])}</span>`:''}</label>`;
+  return `<div class="modal-section"><div class="modal-section-title">Paperwork</div>
+    ${formsPart}
+    <div style="display:flex;flex-direction:column;gap:6px;margin-top:10px">
+      ${chk('clientHasForms','clientHasFormsDate',`Client has a copy of ${co?rEsc(rollCoName(co))+"'s":"the old company's"} forms`)}
+      ${chk('letterSigned','letterSignedDate','Client signed the transfer letter')}
+      ${chk('letterMailed','letterMailedDate',`Letter mailed to ${co?rEsc(rollCoName(co)):'the old company'}`)}${(!r.letterMailed&&!r.requestSentDate)?`<div style="font-size:11px;color:var(--color-text-tertiary);margin-left:22px">Wait until the request has gone out (Mark as sent) so your letter arrives after it.</div>`:''}
+    </div>
+    <div style="margin-top:10px;display:flex;flex-wrap:wrap;gap:6px;align-items:center"><button class="btn btn-sm" onclick="rollPrintLetter('${id}')"><i class="ti ti-printer"></i> Print transfer letter</button><button class="btn btn-sm" onclick="rollEmailLetter('${id}')"><i class="ti ti-mail"></i> Email to client</button> <span style="font-size:11px;color:var(--color-text-tertiary)">auto-filled for this client</span></div>
+  </div>`;
+}
+function rollSetPaper(id,field,dateField,on){
+  const r=DB.rollovers.find(x=>x.id===id);if(!r)return;
+  r[field]=on;r[dateField]=on?rollToday():'';
+  const label=field==='letterSigned'?'Transfer letter signed':field==='letterMailed'?'Transfer letter mailed':"Client has old company's forms";
+  if(field==='letterMailed'&&on&&r.letterTaskId){const t=DB.tasks.find(x=>x.id===r.letterTaskId);if(t)t.done=true;}
+  r.activities.push({date:rollToday(),type:'Paperwork',text:label+(on?' ✓':' → unchecked')});
+  save();openRolloverDetail(id);
+}
+// Company forms library panel on the Rollovers page
+function rollFormsLibraryHtml(){
+  const keys=Object.keys(DB.rollForms||{}).sort((a,b)=>DB.rollForms[a].name.localeCompare(DB.rollForms[b].name));
+  return `<div class="card" style="margin-top:16px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+      <div><div style="font-size:13px;font-weight:500"><i class="ti ti-folder" style="color:var(--brand);margin-right:5px"></i>Company forms library</div><div style="font-size:11px;color:var(--color-text-secondary)">Transfer-out, surrender and conservation paperwork for the companies money comes from. Shows up automatically on matching rollovers.</div></div>
+      <button class="btn btn-sm" onclick="openRollFormModal('')"><i class="ti ti-plus"></i> Add company</button>
+    </div>
+    ${keys.length?keys.map(k=>{const f=DB.rollForms[k];return `<div style="padding:8px 0;border-bottom:0.5px solid var(--color-border-tertiary)">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><span style="font-size:13px;font-weight:500">${rEsc(f.name)}</span><button class="btn btn-sm" onclick="openRollFormModal('${sattr(k)}')"><i class="ti ti-edit"></i> Edit</button></div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">${rollFormLinksHtml(f,true)||'<span style="font-size:11px;color:var(--color-text-tertiary)">No links yet</span>'}</div>
+      ${f.notes?`<div style="font-size:11px;color:var(--color-text-secondary);margin-top:4px">${rEsc(f.notes)}</div>`:''}
+    </div>`;}).join(''):'<p style="font-size:13px;color:var(--color-text-secondary)">No companies yet.</p>'}
+    <div style="font-size:11px;color:var(--color-text-tertiary);margin-top:8px">Tip: for files in OneDrive, right-click → Share → Copy link, and paste that link here so it opens on your phone and tablet too.</div>
+  </div>`;
+}
+function rollFormLinkRow(l){l=l||{label:'',url:''};return `<div class="rf-row" style="display:grid;grid-template-columns:1fr 2fr auto;gap:6px;margin-bottom:6px"><input class="rf-label" value="${sattr(l.label)}" placeholder="e.g. Surrender form"/><input class="rf-url" value="${sattr(l.url)}" placeholder="https://… (OneDrive share link or company website)"/><button class="btn btn-sm btn-danger" onclick="this.closest('.rf-row').remove()"><i class="ti ti-x"></i></button></div>`;}
+function openRollFormModal(key,returnTo,prefillName){
+  const f=key&&DB.rollForms[key]?DB.rollForms[key]:{name:prefillName||'',notes:'',links:[]};
+  const links=f.links.length?f.links:[{label:'',url:''}];
+  showModal(`<div class="modal-header"><h2>${key&&DB.rollForms[key]?'Edit company forms':'Add company forms'}</h2><button class="btn btn-sm" onclick="closeModal()"><i class="ti ti-x"></i></button></div>
+  <div class="modal-body">
+    <div class="form-group"><label>Company name *</label><input id="rf-name" value="${sattr(f.name)}" placeholder="e.g. Horace Mann"/><div style="font-size:11px;color:var(--color-text-tertiary);margin-top:4px">Match how you type it in a rollover's "Current company" box (capitals don't matter).</div></div>
+    <div class="form-group"><label>Forms &amp; links</label><div id="rf-links">${links.map(rollFormLinkRow).join('')}</div><button class="btn btn-sm" onclick="document.getElementById('rf-links').insertAdjacentHTML('beforeend',rollFormLinkRow())"><i class="ti ti-plus"></i> Add another link</button></div>
+    <div class="form-group"><label>Notes <span style="color:var(--color-text-tertiary)">— what this company needs, quirks, phone numbers</span></label><textarea id="rf-notes" style="height:70px" placeholder="e.g. Requires medallion signature guarantee; TPA sign-off for district plans">${rEsc(f.notes)}</textarea></div>
+  </div>
+  <div class="modal-footer">${key&&DB.rollForms[key]?`<button class="btn btn-danger" onclick="rollDeleteForms('${sattr(key)}','${returnTo||''}')"><i class="ti ti-trash"></i> Delete</button>`:''}<button class="btn" onclick="${returnTo?`openRolloverDetail('${returnTo}')`:'closeModal()'}">Cancel</button><button class="btn btn-primary" onclick="rollSaveForms('${sattr(key)}','${returnTo||''}')">Save</button></div>`);
+}
+function rollSaveForms(oldKey,returnTo){
+  const name=document.getElementById('rf-name').value.trim();if(!name){alert('Company name required.');return;}
+  const links=[...document.querySelectorAll('#rf-links .rf-row')].map(r=>({label:r.querySelector('.rf-label').value.trim(),url:r.querySelector('.rf-url').value.trim()})).filter(l=>l.url);
+  const bad=links.find(l=>!/^https?:\/\//i.test(l.url));
+  if(bad){alert('Links need to start with https:// — for OneDrive files use Share → Copy link.');return;}
+  const k=rollFormKey(name);
+  if(oldKey&&oldKey!==k)delete DB.rollForms[oldKey];
+  DB.rollForms[k]={name,notes:document.getElementById('rf-notes').value.trim(),links};
+  save();
+  if(returnTo)openRolloverDetail(returnTo);else closeModal();
+  rollRefresh();showToast('Forms saved for '+name,'ok');
+}
+function rollDeleteForms(key,returnTo){if(!confirm('Remove this company from your forms library?'))return;delete DB.rollForms[key];save();if(returnTo)openRolloverDetail(returnTo);else closeModal();rollRefresh();}
+// Advisor info printed on the letter (set once)
+function openRollLetterSettings(){
+  const L=DB.rollLetter||{};
+  showModal(`<div class="modal-header"><h2>Transfer letter &amp; timing</h2><button class="btn btn-sm" onclick="closeModal()"><i class="ti ti-x"></i></button></div>
+  <div class="modal-body">
+    <p style="font-size:12px;color:var(--color-text-secondary);margin-bottom:12px">This prints in the "financial professional" section of every client transfer letter.</p>
+    <div class="form-row"><div class="form-group" style="margin:0"><label>Your name</label><input id="rl-advisor" value="${sattr(L.advisor)}"/></div><div class="form-group" style="margin:0"><label>Firm</label><input id="rl-firm" value="${sattr(L.firm)}"/></div></div>
+    <div class="form-row"><div class="form-group" style="margin:0"><label>Phone</label><input id="rl-phone" value="${sattr(L.phone)}" oninput="fmtPhoneInput(this)"/></div><div class="form-group" style="margin:0"><label>Email</label><input id="rl-email" value="${sattr(L.email)}"/></div></div>
+    <div class="form-group" style="margin-top:12px"><label>Remind me to check the portal this many days after "Submitted"</label><input id="rl-days" type="number" min="1" max="30" value="${Number(L.checkDays)||3}" style="max-width:100px"/></div>
+  </div>
+  <div class="modal-footer"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="rollSaveLetterSettings()">Save</button></div>`);
+}
+function rollSaveLetterSettings(){DB.rollLetter={advisor:document.getElementById('rl-advisor').value.trim(),firm:document.getElementById('rl-firm').value.trim(),phone:document.getElementById('rl-phone').value.trim(),email:document.getElementById('rl-email').value.trim(),checkDays:parseInt(document.getElementById('rl-days').value)||3};save();closeModal();showToast('Letter info saved','ok');}
+// The letter itself — filled for a rollover, or blank when id is empty
+function rollEmailLetter(id){
+  const r=DB.rollovers.find(x=>x.id===id);if(!r)return;
+  const L=DB.rollLetter||{};
+  const c=r.contactId?DB.contacts.find(x=>x.id===r.contactId):null;
+  const to=(c&&c.email)||'';
+  const first=(rollClient(r).split(' ')[0])||'there';
+  const from=rollCoName(r.fromCustodian)||'your current company';
+  const acct=r.fromType?('your '+r.fromType):'your account';
+  const sig=[L.advisor,L.firm,L.phone].filter(Boolean).join('\n');
+  const body='Hi '+first+',\n\nAttached is the transfer letter we talked about for moving '+acct+' from '+from+'. Please print it, sign and date it at the bottom, and send it back to me. A clear photo or scan by text or email works great.\n\nThis letter asks '+from+' to process your transfer quickly and to send any paperwork they need to both of us, so nothing gets held up.\n\nThanks!\n'+sig;
+  let u='https://mail.google.com/mail/?view=cm&fs=1&to='+encodeURIComponent(to)+'&su='+encodeURIComponent('Your transfer letter to sign')+'&body='+encodeURIComponent(body);
+  if(L.email&&/@/.test(L.email))u+='&authuser='+encodeURIComponent(L.email);
+  window.open(u,'_blank','noopener');
+  r.activities.push({date:rollToday(),type:'Email',text:'Transfer letter emailed to client'+(to?' ('+to+')':'')});
+  save();
+  rollPrintLetter(id,true);
+  if(!to)showToast('No email on file for this client. Add it in the email that opened.');
+}
+function rollPrintLetter(id,emailMode){
+  const r=id?DB.rollovers.find(x=>x.id===id):null;
+  const L=DB.rollLetter||{};
+  const line=(v,w)=>v?`<strong>${rEsc(v)}</strong>`:`<span style="display:inline-block;min-width:${w||220}px;border-bottom:1px solid #333">&nbsp;</span>`;
+  const client=r?rollClient(r):'', from=r?rollCoName(r.fromCustodian):'', type=r?(r.fromType||''):'', to=r?(r.carrier||''):'';
+  const pr=document.getElementById('print-root');
+  pr.innerHTML=`<div class="enroll-sheet roll-letter" style="font-size:14px;line-height:1.55"><style>.roll-letter p{margin:0 0 12px}</style>
+    ${emailMode?`<div class="no-print" style="background:#E6F1FB;color:#185FA5;border-radius:8px;padding:10px 12px;font-size:13px;margin-bottom:12px"><strong>Gmail opened in a new tab.</strong> Click <strong>Print / Save as PDF</strong>, choose <strong>Save as PDF</strong>, then attach that file to the email and send.</div>`:''}
+    <div class="ef-toolbar no-print"><button class="btn" onclick="simrpCloseForm()"><i class="ti ti-x"></i> Close</button><button class="btn btn-primary" onclick="window.print()"><i class="ti ti-printer"></i> Print / Save as PDF</button></div>
+    <h1>Letter of Instruction — Account Transfer</h1>
+    <div class="ef-sub">Regarding a transfer request sent to you by ${to?rEsc(to):"my new provider"}</div>
+    <div style="margin-bottom:18px">
+      <div>Date: ${line('',160)}</div>
+      <div style="margin-top:8px">To: ${line(from,260)} <span style="color:#555">(current company)</span></div>
+      <div style="margin-top:8px">Account owner: ${line(client,260)}</div>
+      <div style="margin-top:8px">Account / contract number: ${line('',200)}&nbsp;&nbsp; Account type: ${line(type,120)}</div>
+      <div style="margin-top:8px">Receiving company: ${line(to,260)}</div>
+    </div>
+    <p>To whom it may concern:</p>
+    <p>The receiving company named above has sent you a request, on my behalf, to transfer my account listed above. I made this decision after careful consideration, and I ask that you process that request as promptly as possible.</p>
+    <p>Please do not contact me to discuss retaining this account. If your company requires any additional forms, signatures, or disclosures to complete this transfer, please send them to both me and my financial professional named below, ideally within 10 business days of receiving this request, so they can be completed without delay.</p>
+    <p>I authorize you to discuss the status of this transfer with my financial professional and to provide them with copies of any forms required to complete it.</p>
+    <div style="margin-top:22px;padding:12px 14px;border:1px solid #ccc;border-radius:6px">
+      <div style="font-weight:700;margin-bottom:6px">My financial professional</div>
+      <div>Name: ${line(L.advisor,200)}&nbsp;&nbsp; Firm: ${line(L.firm,160)}</div>
+      <div style="margin-top:6px">Phone: ${line(L.phone,170)}&nbsp;&nbsp; Email: ${line(L.email,200)}</div>
+    </div>
+    <div class="ef-sig" style="margin-top:28px">
+      <div>Account owner signature: ${line('',260)}&nbsp;&nbsp; Date: ${line('',120)}</div>
+      <div style="margin-top:14px">Printed name: ${line(client,240)}&nbsp;&nbsp; Last 4 of SSN: ${line('',80)}</div>
+      <div style="margin-top:14px">Phone: ${line('',180)}</div>
+    </div>
+  </div>`;
+  pr.classList.add('show');
+  closeModal();
+}
 function renderGuide(){
   const el=document.getElementById('page-guide');
   const gsec=(icon,title,body)=>`<div class="card" style="margin-bottom:14px"><div style="font-size:14px;font-weight:600;margin-bottom:8px"><i class="ti ${icon}" style="color:var(--brand);margin-right:6px"></i>${title}</div><div style="font-size:13px;line-height:1.65;color:var(--color-text-primary)">${body}</div></div>`;
@@ -2503,7 +2695,8 @@ function renderGuide(){
     ${gsec('ti-arrows-exchange','Rollovers',`Every rollover gets a card on the <strong>Rollovers</strong> board, from first conversation to funded. Link it to the client's contact and it shows up on their record under a Rollovers tab. If the client isn't in your contacts yet, the CRM offers to add them on the spot, and a contact you add later with the same name links up automatically.<br><br>
       <strong>Signed = client:</strong> once a rollover reaches <em>Client signed</em>, a linked contact who is still a Lead or Prospect becomes a Client automatically, with today as their client-since date if none is set.<br><br>
       <strong>The waiting game:</strong> once a rollover is <em>Submitted</em> or <em>Transfer in progress</em>, open it to find the <strong>Transfer checklist</strong>: TPA sign-off, whether the old company has sent the client forms, the forms deadline, and whether the check has gone out. Changes save automatically and land in the activity log.<br><br>
-      <strong>Built-in nudges:</strong> moving a rollover to <em>Submitted</em> automatically adds a task to remind the client to watch their mail. The Dashboard shows a red card for any client sitting on forms from the old company, plus a list of rollovers that have been waiting more than 14 days.`)}
+      <strong>Paperwork:</strong> every rollover has a Paperwork section. It shows the old company's forms from your <strong>Company forms library</strong> (bottom of the Rollovers page), a <strong>Print transfer letter</strong> button that fills in the client, the old company and the receiving company, and an <strong>Email to client</strong> button that opens a ready-to-send Gmail message (save the letter as a PDF and attach it). Use <strong>Blank letter</strong> at the top of the page to print copies to fill in by hand, and <strong>Letter info</strong> to set your own contact details once.<br><br>
+      <strong>Built-in nudges:</strong> moving a rollover to <em>Submitted</em> automatically adds two tasks: remind the client to watch their mail, and check the receiving company's portal a few days later (set the number of days under <em>Letter info</em>). When the portal shows the request went out, click <strong>Mark as sent</strong> in the Transfer checklist: the rollover moves to <em>Transfer in progress</em> and a "Mail transfer letter" task appears, so your letter arrives after their request. Tick <em>Letter mailed</em> when it's in the mail. The Dashboard shows a red card for any client sitting on forms from the old company, plus a list of rollovers that have been waiting more than 14 days.`)}
     ${gsec('ti-send','Campaigns',`
       Under <strong>Campaigns</strong>, pick a message template, narrow the audience (category, product owned, market, age), preview who it hits, and export the list as a CSV for your mail-merge. Send from Gmail as your XO address. Think of the CRM as the brain that builds the list; the sending happens in your email tool.`)}
 
