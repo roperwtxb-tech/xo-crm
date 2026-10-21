@@ -358,9 +358,10 @@ let _pendingSave = Promise.resolve();
 function emptyDB(){ return {contacts:[],deals:[],tasks:[],emails:[],campaigns:[],simrp:[],simrpLinks:{},rollovers:[]}; }
 async function initDB(){
   DB = emptyDB(); CUSTOM_FIELDS = [];
-  const { data, error } = await sb.from('crm_data').select('data,custom_fields').eq('agent_id', CURRENT_AGENT_ID).maybeSingle();
+  const { data, error } = await sb.from('crm_data').select('data,custom_fields,updated_at').eq('agent_id', CURRENT_AGENT_ID).maybeSingle();
   if(error){ console.error('Load failed', error); showToast('Could not load your data — refresh to retry'); return; }
   if(data){
+    _serverStamp = data.updated_at || null;
     DB = Object.assign(emptyDB(), data.data || {});
     CUSTOM_FIELDS = data.custom_fields || [];
     normalizeDB();
@@ -380,6 +381,7 @@ function normalizeDB(){
     if(c.state===undefined) c.state='';
     if(c.zip===undefined) c.zip='';
     if(c.mailSame===undefined) c.mailSame=true;
+    if(c.goesBy===undefined) c.goesBy='';
     ['mailAddress','mailCity','mailState','mailZip'].forEach(k=>{if(c[k]===undefined)c[k]='';});
     if(c.birthday===undefined) c.birthday='';
     if(c.clientSince===undefined) c.clientSince='';
@@ -442,12 +444,43 @@ function normalizeDB(){
     if(!Array.isArray(o.notes)) o.notes=[];
   });
 }
+// ── Stale-copy guard: never let an out-of-date screen save over newer data ──
+let _serverStamp=null, _staleLock=false;
+function stampMs(s){const t=new Date(s).getTime();return isNaN(t)?null:t;}
+async function serverIsNewer(){
+  if(!CURRENT_AGENT_ID||!_serverStamp)return false;
+  const { data, error } = await sb.from('crm_data').select('updated_at').eq('agent_id', CURRENT_AGENT_ID).maybeSingle();
+  if(error||!data||!data.updated_at)return false;
+  return stampMs(data.updated_at)!==stampMs(_serverStamp);
+}
+function staleReload(reason){
+  if(_staleLock)return; _staleLock=true;
+  const msg=reason==='save'
+    ?'Your CRM was updated somewhere else (another tab, device, or an old copy of this page). To keep anything from being overwritten, your last change was <strong>not saved</strong>. Loading the latest version now. Please redo that last step.'
+    :'Loading the latest version of your CRM…';
+  const el=document.createElement('div');
+  el.style.cssText='position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.45);display:flex;align-items:center;justify-content:center;padding:20px';
+  el.innerHTML='<div style="background:var(--color-background-primary);color:var(--color-text-primary);max-width:420px;border-radius:12px;padding:20px;font-size:14px;line-height:1.5;box-shadow:0 10px 30px rgba(0,0,0,.25)"><div style="font-weight:600;margin-bottom:8px"><i class="ti ti-refresh"></i> Refreshing your CRM</div>'+msg+'</div>';
+  document.body.appendChild(el);
+  setTimeout(()=>{(window.__xoReload||(()=>location.reload()))();}, reason==='save'?3500:600);
+}
+document.addEventListener('visibilitychange',async()=>{
+  if(document.visibilityState!=='visible'||_staleLock)return;
+  try{await _pendingSave;}catch(e){}
+  if(await serverIsNewer())staleReload('focus');
+});
+window.addEventListener('pageshow',e=>{if(e.persisted)(window.__xoReload||(()=>location.reload()))();});
 function save(){
   if(!CURRENT_AGENT_ID) return _pendingSave;
-  _pendingSave = sb.from('crm_data').upsert({
-    agent_id: CURRENT_AGENT_ID, data: DB, custom_fields: CUSTOM_FIELDS, updated_at: new Date().toISOString()
-  }, { onConflict: 'agent_id' }).then(({ error })=>{
+  _pendingSave = _pendingSave.catch(()=>{}).then(async ()=>{
+    if(_staleLock) return;
+    if(await serverIsNewer()){ staleReload('save'); return; }
+    const stamp = new Date().toISOString();
+    const { error } = await sb.from('crm_data').upsert({
+      agent_id: CURRENT_AGENT_ID, data: DB, custom_fields: CUSTOM_FIELDS, updated_at: stamp
+    }, { onConflict: 'agent_id' });
     if(error){ console.error('Save failed', error); showToast('Save failed — check your connection'); }
+    else { _serverStamp = stamp; }
   });
   return _pendingSave;
 }
@@ -786,7 +819,7 @@ function renderContactRows(){
   const filtered=DB.contacts.filter(c=>{
     if(contactStageFilter!=='All'&&c.stage!==contactStageFilter)return false;
     if(!s)return true;
-    return (c.name||'').toLowerCase().includes(s)||(c.email||'').toLowerCase().includes(s)||(c.district||'').toLowerCase().includes(s)||(c.vertical||'').toLowerCase().includes(s)||(c.household||'').toLowerCase().includes(s)||(c.tags||'').toLowerCase().includes(s)||(c.interests||[]).join(' ').toLowerCase().includes(s)||(c.phone||'').toLowerCase().includes(s);
+    return (c.name||'').toLowerCase().includes(s)||(c.goesBy||'').toLowerCase().includes(s)||(c.email||'').toLowerCase().includes(s)||(c.district||'').toLowerCase().includes(s)||(c.vertical||'').toLowerCase().includes(s)||(c.household||'').toLowerCase().includes(s)||(c.tags||'').toLowerCase().includes(s)||(c.interests||[]).join(' ').toLowerCase().includes(s)||(c.phone||'').toLowerCase().includes(s);
   });
   const dir=contactSort.dir;
   filtered.sort((a,b)=>{
@@ -802,7 +835,7 @@ function renderContactRows(){
   box.innerHTML = filtered.length?`<table><thead><tr><th style="width:28px"><input type="checkbox" onclick="toggleSelectAllContacts(this.checked)" ${_lastFilteredIds.length&&_lastFilteredIds.every(id=>contactSelected.has(id))?'checked':''}/></th><th onclick="setContactSort('name')" style="cursor:pointer">Name${sortArrow('name')}</th><th onclick="setContactSort('stage')" style="cursor:pointer">Category${sortArrow('stage')}</th><th class="hide-sm" onclick="setContactSort('vertical')" style="cursor:pointer">Market${sortArrow('vertical')}</th><th class="hide-sm" onclick="setContactSort('district')" style="cursor:pointer">District / Employer${sortArrow('district')}</th><th class="hide-sm" onclick="setContactSort('age')" style="cursor:pointer">Age${sortArrow('age')}</th><th></th></tr></thead><tbody>
     ${filtered.map(c=>{const age=calcAge(c.birthday);return `<tr>
       <td style="width:28px"><input type="checkbox" onclick="toggleContactSel('${c.id}',this.checked)" ${contactSelected.has(c.id)?'checked':''}/></td>
-      <td style="cursor:pointer" onclick="openContactDetail('${c.id}')"><div style="display:flex;align-items:center;gap:8px"><div class="avatar" style="background:${avatarColor(c.name)};color:${avatarText(c.name)};font-size:11px">${initials(c.name)}</div><div style="min-width:0"><div class="contact-name" style="font-weight:500;color:var(--color-text-info)">${c.name}</div><div style="font-size:11px;color:var(--color-text-secondary);overflow:hidden;text-overflow:ellipsis;max-width:180px">${c.email||'—'}</div></div></div></td>
+      <td style="cursor:pointer" onclick="openContactDetail('${c.id}')"><div style="display:flex;align-items:center;gap:8px"><div class="avatar" style="background:${avatarColor(c.name)};color:${avatarText(c.name)};font-size:11px">${initials(c.name)}</div><div style="min-width:0"><div class="contact-name" style="font-weight:500;color:var(--color-text-info)">${c.name}${c.goesBy?` <span style="font-weight:400;color:var(--color-text-secondary)">("${rEsc(c.goesBy)}")</span>`:''}</div><div style="font-size:11px;color:var(--color-text-secondary);overflow:hidden;text-overflow:ellipsis;max-width:180px">${c.email||'—'}</div></div></div></td>
       <td><span class="badge ${REL_COLORS[c.stage]||'badge-gray'}">${c.stage}</span></td>
       <td class="hide-sm" style="color:var(--color-text-secondary)">${c.vertical||'—'}</td>
       <td class="hide-sm" style="color:var(--color-text-secondary)">${c.district||'—'}</td>
@@ -915,6 +948,7 @@ function normalizeOne(c){
   return {
     id:uid(),
     name:(c.name||'').toString().trim(),
+    goesBy:c.goesBy||'',
     email:c.email||'',phone:c.phone||'',
     stage:REL_STAGES.includes(c.stage)?c.stage:(legacy[c.status]||'Lead'),
     vertical:c.vertical||'',district:c.district||'',household:c.household||'',
@@ -987,13 +1021,13 @@ function restoreBackupFile(){
 function contactMailing(c){const d=c.mailSame===false&&(c.mailAddress||c.mailCity||c.mailZip);return d?[c.mailAddress||'',c.mailCity||'',c.mailState||'',c.mailZip||'']:[c.address||'',c.city||'',c.state||'',c.zip||''];}
 function exportCSV(){
   const cfKeys=CUSTOM_FIELDS.map(f=>f.key);
-  const cols=['first name','last name','name','email','phone','stage','vertical','district','address','city','state','zip','birthday','age','clientSince','spouseName','interests','policies','tags',...cfKeys,'mailing address','mailing city','mailing state','mailing zip'];
+  const cols=['first name','last name','name','email','phone','stage','vertical','district','address','city','state','zip','birthday','age','clientSince','spouseName','interests','policies','tags',...cfKeys,'mailing address','mailing city','mailing state','mailing zip','goes by'];
   const rows=DB.contacts.map(c=>{
     const _nm=(c.name||'').trim();const _sp=_nm.indexOf(' ');const _first=_sp<0?_nm:_nm.slice(0,_sp);const _last=_sp<0?'':_nm.slice(_sp+1);
     const row=[_first,_last,c.name,c.email,c.phone,c.stage,c.vertical,c.district,c.address,c.city,c.state,c.zip,c.birthday,calcAge(c.birthday)??'',c.clientSince,c.spouseName,
       (c.interests||[]).join('; '),
       (c.policies||[]).map(p=>`${p.company} ${p.product} ${p.number}`.trim()).join(' | '),
-      c.tags||'',...cfKeys.map(k=>(c.custom&&c.custom[k])||''),...contactMailing(c)];
+      c.tags||'',...cfKeys.map(k=>(c.custom&&c.custom[k])||''),...contactMailing(c),c.goesBy||''];
     return row.map(v=>`"${String(v==null?'':v).replace(/"/g,'""')}"`).join(',');
   });
   const blob=new Blob([cols.join(',')+'\n'+rows.join('\n')],{type:'text/csv'});
@@ -1010,6 +1044,7 @@ function openContactModal(id=''){
   <div class="modal-body">
     <div class="form-row"><div class="form-group" style="margin:0"><label>Full name *</label><input id="c-name" value="${(c.name||'').replace(/"/g,'&quot;')}" placeholder="Jane Smith"/></div>
     <div class="form-group" style="margin:0"><label>Email</label><input id="c-email" value="${(c.email||'').replace(/"/g,'&quot;')}" placeholder="jane@example.com"/></div></div>
+    <div class="form-group"><label>Goes by <span style="color:var(--color-text-tertiary)">— nickname, if different (e.g. Pat for Patrick)</span></label><input id="c-goesby" value="${(c.goesBy||'').replace(/"/g,'&quot;')}" placeholder="Optional"/></div>
     <div class="form-row"><div class="form-group" style="margin:0"><label>Phone</label><input id="c-phone" value="${(c.phone||'').replace(/"/g,'&quot;')}" placeholder="(325) 203-0423" oninput="fmtPhoneInput(this)"/></div>
     <div class="form-group" style="margin:0"><label>Category</label><select id="c-stage">${REL_STAGES.map(s=>`<option ${c.stage===s?'selected':''}>${s}</option>`).join('')}</select></div></div>
     <div class="form-row"><div class="form-group" style="margin:0"><label>Market / vertical</label><select id="c-vertical"><option value="">— Select —</option>${VERTICALS.map(v=>`<option ${c.vertical===v?'selected':''}>${v}</option>`).join('')}</select></div>
@@ -1075,7 +1110,7 @@ function captureContactDraft(){
   if(!document.getElementById('c-name'))return;
   const g=id=>{const e=document.getElementById(id);return e?e.value:'';};
   contactDraft={
-    stage:g('c-stage'),name:g('c-name'),email:g('c-email'),phone:g('c-phone'),
+    stage:g('c-stage'),name:g('c-name'),goesBy:g('c-goesby'),email:g('c-email'),phone:g('c-phone'),
     vertical:g('c-vertical'),district:g('c-district'),household:g('c-household'),
     address:g('c-address'),city:g('c-city'),state:g('c-state'),zip:g('c-zip'),mailSame:(document.getElementById('c-mailsame')||{checked:true}).checked,mailAddress:g('c-mailaddr'),mailCity:g('c-mailcity'),mailState:g('c-mailstate'),mailZip:g('c-mailzip'),employees:g('c-employees'),
     birthday:g('c-birthday'),clientSince:g('c-clientsince'),spouseName:g('c-spouse'),spouseBirthday:g('c-spousebday'),
@@ -1093,6 +1128,7 @@ function saveContact(id){
   const oldStage=existing?existing.stage:null;
   const data={
     name,
+    goesBy:document.getElementById('c-goesby').value.trim(),
     email:document.getElementById('c-email').value.trim(),
     phone:document.getElementById('c-phone').value.trim(),
     stage:document.getElementById('c-stage').value,
@@ -1175,11 +1211,11 @@ function openContactDetail(id){
   const hh=c.household?DB.contacts.filter(x=>x.household===c.household&&x.id!==c.id):[];
   const householdHtml=hh.length?`<div class="modal-section"><div class="modal-section-title">Household · ${c.household} (${hh.length+1} people)</div>${hh.map(m=>`<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:0.5px solid var(--color-border-tertiary);cursor:pointer" onclick="openContactDetail('${m.id}')"><div class="avatar" style="width:26px;height:26px;font-size:10px;background:${avatarColor(m.name)};color:${avatarText(m.name)}">${initials(m.name)}</div><div style="flex:1;min-width:0"><span class="contact-name" style="font-size:13px;color:var(--color-text-info)">${m.name}</span> <span class="badge ${REL_COLORS[m.stage]||'badge-gray'}" style="margin-left:4px">${m.stage}</span></div></div>`).join('')}</div>`:'';
   const wfHtml=(DB.workflows&&DB.workflows.length)?`<div class="modal-section"><div class="modal-section-title">Run a workflow</div><div style="display:flex;gap:8px"><select id="wf-apply" style="flex:1">${DB.workflows.map(w=>`<option value="${w.id}">${w.name} (${w.steps.length} tasks)</option>`).join('')}</select><button class="btn btn-sm btn-primary" onclick="runWorkflowManual(document.getElementById('wf-apply').value,'${id}')"><i class="ti ti-player-play"></i> Apply</button></div></div>`:'';
-  showModal(`<div class="modal-header"><h2>${c.name}</h2><button class="btn btn-sm" onclick="closeModal()"><i class="ti ti-x"></i></button></div>
+  showModal(`<div class="modal-header"><h2>${c.name}${c.goesBy?` <span style="font-weight:400;color:var(--color-text-secondary)">("${rEsc(c.goesBy)}")</span>`:''}</h2><button class="btn btn-sm" onclick="closeModal()"><i class="ti ti-x"></i></button></div>
   <div class="modal-body">
     <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
       <div class="avatar" style="width:44px;height:44px;font-size:14px;background:${avatarColor(c.name)};color:${avatarText(c.name)}">${initials(c.name)}</div>
-      <div style="flex:1;min-width:0"><div style="font-weight:500;font-size:15px">${c.name}</div><div style="font-size:12px;color:var(--color-text-secondary);overflow:hidden;text-overflow:ellipsis">${c.email||'—'}${c.phone?' · '+c.phone:''}</div></div>
+      <div style="flex:1;min-width:0"><div style="font-weight:500;font-size:15px">${c.name}${c.goesBy?` <span style="font-weight:400;color:var(--color-text-secondary)">goes by ${rEsc(c.goesBy)}</span>`:''}</div><div style="font-size:12px;color:var(--color-text-secondary);overflow:hidden;text-overflow:ellipsis">${c.email||'—'}${c.phone?' · '+c.phone:''}</div></div>
       <span class="badge ${REL_COLORS[c.stage]||'badge-gray'}">${c.stage}</span>
     </div>
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;padding:8px 10px;background:var(--color-background-secondary);border-radius:8px;flex-wrap:wrap">
@@ -2621,7 +2657,7 @@ function rollEmailLetter(id){
   const L=DB.rollLetter||{};
   const c=r.contactId?DB.contacts.find(x=>x.id===r.contactId):null;
   const to=(c&&c.email)||'';
-  const first=(rollClient(r).split(' ')[0])||'there';
+  const first=(c&&c.goesBy&&c.goesBy.trim())||(rollClient(r).split(' ')[0])||'there';
   const from=rollCoName(r.fromCustodian)||'your current company';
   const acct=r.fromType?('your '+r.fromType):'your account';
   const sig=[L.advisor,L.firm,L.phone].filter(Boolean).join('\n');
