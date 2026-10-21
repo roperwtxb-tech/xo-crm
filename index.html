@@ -1004,7 +1004,7 @@ function policyRowHTML(p){p=p||{};return `<div class="rep-row rep-policy"><input
 function addChildRow(){document.getElementById('children-list').insertAdjacentHTML('beforeend',childRowHTML());}
 function addPolicyRow(){document.getElementById('policy-list').insertAdjacentHTML('beforeend',policyRowHTML());}
 function openContactModal(id=''){
-  const c=id?DB.contacts.find(x=>x.id===id):(contactDraft||{stage:'Lead',children:[],interests:[],policies:[],custom:{}});
+  const c=id?DB.contacts.find(x=>x.id===id):(contactDraft||contactDraftFromLS()||{stage:'Lead',children:[],interests:[],policies:[],custom:{}});
   const cfHtml=CUSTOM_FIELDS.length?`<div class="modal-section"><div class="modal-section-title">Custom fields</div>${CUSTOM_FIELDS.map(f=>`<div class="form-group"><label>${f.label}</label><input id="cf-${f.key}" value="${(c.custom&&c.custom[f.key])||''}" placeholder="${f.label}" /></div>`).join('')}</div>`:'';
   showModal(`<div class="modal-header"><h2>${id?'Edit contact':'New contact'}</h2><button class="btn btn-sm" onclick="closeModal()"><i class="ti ti-x"></i></button></div>
   <div class="modal-body">
@@ -1066,6 +1066,7 @@ function openContactModal(id=''){
   </div>
   <div class="modal-footer"><button class="btn" onclick="cancelContactModal()">Cancel</button><button class="btn btn-primary" onclick="saveContact('${id}')">Save</button></div>`);
   currentContactModalMode = id ? 'edit' : 'new';
+  if(!id) contactDraftAttach();
 }
 function collectChildren(){return [...document.querySelectorAll('#children-list .rep-row')].map(r=>({name:r.querySelector('.child-name').value.trim(),birthday:r.querySelector('.child-bday').value})).filter(c=>c.name);}
 function collectPolicies(){return [...document.querySelectorAll('#policy-list .rep-row')].map(r=>({company:r.querySelector('.pol-company').value.trim(),product:r.querySelector('.pol-product').value.trim(),number:r.querySelector('.pol-number').value.trim(),effective:r.querySelector('.pol-eff').value})).filter(p=>p.company||p.number);}
@@ -1084,7 +1085,7 @@ function captureContactDraft(){
     _draftNote:g('c-note'),custom:{}
   };
 }
-function cancelContactModal(){ contactDraft=null; currentContactModalMode=null; rollPendingLink=null; closeModal(); }
+function cancelContactModal(){ contactDraft=null; currentContactModalMode=null; rollPendingLink=null; lsDel(CONTACT_DRAFT_KEY); closeModal(); }
 function saveContact(id){
   const name=document.getElementById('c-name').value.trim();
   if(!name){alert('Name is required.');return;}
@@ -1134,7 +1135,7 @@ function saveContact(id){
   if(id){Object.assign(existing,data);cid=id;contactObj=existing;}
   else{const nc={id:uid(),...data,created:Date.now(),notes:[],activities:[]};DB.contacts.push(nc);cid=nc.id;contactObj=nc;}
   if(noteText){ if(!Array.isArray(contactObj.notes))contactObj.notes=[]; contactObj.notes.push({date:new Date().toISOString().slice(0,10),text:noteText}); }
-  contactDraft=null; currentContactModalMode=null;
+  contactDraft=null; currentContactModalMode=null; lsDel(CONTACT_DRAFT_KEY);
   let auto=0;
   if(data.stage && data.stage!==oldStage){ auto=autoRunWorkflows(data.stage,cid); }
   const _rl=rollLinkContact(contactObj);
@@ -2153,6 +2154,17 @@ const ROLL_TPA=['Not needed','Pending','Approved'];
 const ROLL_PAPER=['Nothing yet','Client received it','Completed & returned'];
 const ROLL_STALL_DAYS=14;
 function rEsc(v){return (v==null?'':(''+v)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function rollMoneyParse(v){const n=parseFloat((v||'').toString().replace(/[^0-9.]/g,''));return isNaN(n)?'':Math.round(n*100)/100;}
+function rollMoneyStr(n){if(n===''||n==null||isNaN(n))return'';const [i,d]=Number(n).toFixed(2).split('.');return Number(i).toLocaleString('en-US')+(d!=='00'?'.'+d:'');}
+function rollMoneyInput(el){
+  const raw=el.value, pos=el.selectionStart, digitsBefore=raw.slice(0,pos).replace(/[^0-9.]/g,'').length;
+  let clean=raw.replace(/[^0-9.]/g,''); const dot=clean.indexOf('.');
+  if(dot>=0)clean=clean.slice(0,dot+1)+clean.slice(dot+1).replace(/\./g,'').slice(0,2);
+  const [i,d]=clean.split('.'); const out=(i?Number(i).toLocaleString('en-US'):(d!==undefined?'0':''))+(d!==undefined?'.'+d:'');
+  el.value=out;
+  let p=0,c=0; while(p<out.length&&c<digitsBefore){if(/[0-9.]/.test(out[p]))c++;p++;}
+  try{el.setSelectionRange(p,p);}catch(e){}
+}
 function rollToday(){return new Date().toISOString().slice(0,10);}
 function rollClient(r){if(r.contactId){const c=DB.contacts.find(x=>x.id===r.contactId);if(c)return c.name;}return r.clientName||'(no client)';}
 function rollDaysInStage(r){return r.stageChangedAt?Math.floor((Date.now()-r.stageChangedAt)/864e5):0;}
@@ -2321,7 +2333,7 @@ function rollDatalist(id,field){const vals=[...new Set((DB.rollovers||[]).map(r=
 function openRolloverModal(id='',defaultStage='New opportunity',prefillContactId=''){
   const r=id?DB.rollovers.find(x=>x.id===id):{contactId:prefillContactId,intoType:'Annuity',carrier:'National Life Group'};
   const clientField=r.contactId?contactPickerHtml('r-client',r.contactId):(contactPickerHtml('r-client','').replace('value=""',`value="${sattr(r.clientName||'')}"`));
-  showModal(`<div class="modal-header"><h2>${id?'Edit rollover':'New rollover'}</h2><button class="btn btn-sm" onclick="closeModal()"><i class="ti ti-x"></i></button></div>
+  showModal(`<div class="modal-header"><h2>${id?'Edit rollover':'New rollover'}</h2><button class="btn btn-sm" onclick="rollCancelModal()"><i class="ti ti-x"></i></button></div>
   <div class="modal-body">
     <div class="form-row"><div class="form-group" style="margin:0"><label>Client *</label>${clientField}</div>
     <div class="form-group" style="margin:0"><label>Stage</label><select id="r-stage">${ROLL_STAGES.map(s=>`<option ${((r.stage||defaultStage)===s)?'selected':''}>${s}</option>`).join('')}</select></div></div>
@@ -2330,7 +2342,7 @@ function openRolloverModal(id='',defaultStage='New opportunity',prefillContactId
     <div class="modal-section-title" style="border-top:0.5px solid var(--color-border-tertiary);padding-top:12px">Rolling from</div>
     <div class="form-row"><div class="form-group" style="margin:0"><label>Account type</label><select id="r-from-type"><option value="">—</option>${ROLL_FROM_TYPES.map(t=>`<option ${r.fromType===t?'selected':''}>${t}</option>`).join('')}</select></div>
     <div class="form-group" style="margin:0"><label>Current company (transferring)</label><input id="r-from-cust" list="r-cust-dl" value="${sattr(r.fromCustodian)}" placeholder="e.g. Corebridge, Equitable"/>${rollDatalist('r-cust-dl','fromCustodian')}</div></div>
-    <div class="form-group"><label>Estimated value</label><input id="r-value" type="number" step="0.01" value="${(r.value===''||r.value==null)?'':r.value}" placeholder="$"/></div>
+    <div class="form-group"><label>Estimated value</label><div style="position:relative"><span style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--color-text-secondary);pointer-events:none">$</span><input id="r-value" type="text" inputmode="decimal" autocomplete="off" style="padding-left:22px" value="${(r.value===''||r.value==null)?'':rollMoneyStr(r.value)}" placeholder="0" oninput="rollMoneyInput(this)"/></div></div>
 
     <div class="modal-section-title" style="border-top:0.5px solid var(--color-border-tertiary);padding-top:12px">Rolling into</div>
     <div class="form-row"><div class="form-group" style="margin:0"><label>Product</label><select id="r-into-type">${ROLL_INTO_TYPES.map(t=>`<option ${((r.intoType||'Annuity')===t)?'selected':''}>${t}</option>`).join('')}</select></div>
@@ -2341,7 +2353,8 @@ function openRolloverModal(id='',defaultStage='New opportunity',prefillContactId
     <div class="form-group"><label>Lost reason <span style="color:var(--color-text-tertiary)">(optional)</span></label><input id="r-lost" value="${sattr(r.lostReason)}" placeholder="e.g. conserved by old company, changed mind"/></div>
     ${id?'':`<div class="form-group"><label>First note <span style="color:var(--color-text-tertiary)">(optional)</span></label><textarea id="r-first-note" style="height:60px" placeholder="Anything worth remembering..."></textarea></div>`}
   </div>
-  <div class="modal-footer"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="saveRollover('${id}')">Save</button></div>`);
+  <div class="modal-footer"><button class="btn" onclick="rollCancelModal()">Cancel</button><button class="btn btn-primary" onclick="saveRollover('${id}')">Save</button></div>`);
+  rollDraftAttach(id);
 }
 function saveRollover(id){
   const clientName=document.getElementById('r-client').value.trim();
@@ -2352,7 +2365,7 @@ function saveRollover(id){
     clientName,
     fromType:document.getElementById('r-from-type').value,
     fromCustodian:document.getElementById('r-from-cust').value.trim(),
-    value:parseFloat(document.getElementById('r-value').value)||'',
+    value:rollMoneyParse(document.getElementById('r-value').value),
     intoType:document.getElementById('r-into-type').value,
     carrier:document.getElementById('r-carrier').value.trim(),
     expectedClose:document.getElementById('r-close').value,
@@ -2372,6 +2385,7 @@ function saveRollover(id){
     if(stage!=='New opportunity'){r.stage=stage;rollOnStageChange(r,stage);}
   }
   rollMaybeUpgrade(r);
+  rollClearDraft();
   save();rollRefresh();
   if(!id&&!r.contactId)rollPromptAddContact(r.id);else closeModal();
 }
@@ -2655,6 +2669,43 @@ function rollPrintLetter(id,emailMode){
   </div>`;
   pr.classList.add('show');
   closeModal();
+}
+// ── Unsaved-form drafts: survive closing the box, switching apps, or a page reload ──
+const ROLL_DRAFT_KEY='xo_roll_draft', CONTACT_DRAFT_KEY='xo_contact_draft', DRAFT_MAX_AGE=7*864e5;
+const ROLL_DRAFT_FIELDS=['r-client','r-stage','r-from-type','r-from-cust','r-value','r-into-type','r-carrier','r-close','r-lost','r-first-note'];
+let rollDraft=null, rollDraftFor=null;
+function lsGet(k){try{const s=localStorage.getItem(k);if(!s)return null;const d=JSON.parse(s);if(d&&d._t&&Date.now()-d._t>DRAFT_MAX_AGE){localStorage.removeItem(k);return null;}return d;}catch(e){return null;}}
+function lsSet(k,v){try{v._t=Date.now();localStorage.setItem(k,JSON.stringify(v));}catch(e){}}
+function lsDel(k){try{localStorage.removeItem(k);}catch(e){}}
+function rollCaptureDraft(){
+  if(!document.getElementById('r-client')||rollDraftFor===null)return;
+  const d={id:rollDraftFor,f:{}};
+  ROLL_DRAFT_FIELDS.forEach(k=>{const e=document.getElementById(k);if(e)d.f[k]=e.value;});
+  rollDraft=d;lsSet(ROLL_DRAFT_KEY,d);
+}
+function rollClearDraft(){rollDraft=null;rollDraftFor=null;lsDel(ROLL_DRAFT_KEY);}
+function rollCancelModal(){rollClearDraft();closeModal();}
+// Called right after the rollover form is shown
+function rollDraftAttach(id){
+  rollDraftFor=id||'';
+  const d=rollDraft||lsGet(ROLL_DRAFT_KEY);
+  if(d&&d.id===rollDraftFor&&d.f&&Object.values(d.f).some(v=>v&&v!=='New opportunity'&&v!=='Annuity'&&v!=='National Life Group')){
+    ROLL_DRAFT_FIELDS.forEach(k=>{const e=document.getElementById(k);if(e&&d.f[k]!==undefined)e.value=d.f[k];});
+    rollDraft=d;
+    const body=document.querySelector('#modal-root .modal-body');
+    if(body)body.insertAdjacentHTML('afterbegin',`<div id="r-draft-banner" style="background:var(--color-background-info);color:var(--color-text-info);border-radius:8px;padding:8px 10px;font-size:12px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;gap:8px"><span><i class="ti ti-history"></i> Picked up where you left off.</span><a class="gcal" style="cursor:pointer;font-weight:500" onclick="rollDraftStartOver('${rollDraftFor}')">Start over</a></div>`);
+  }
+  const m=document.querySelector('#modal-root .modal');
+  if(m){m.addEventListener('input',rollCaptureDraft);m.addEventListener('change',rollCaptureDraft);}
+}
+function rollDraftStartOver(id){rollClearDraft();openRolloverModal(id||'');}
+// Contact form: same safety net, on top of the existing in-memory draft
+function contactDraftPersist(){if(contactDraft&&currentContactModalMode==='new')lsSet(CONTACT_DRAFT_KEY,contactDraft);}
+function contactDraftFromLS(){const d=lsGet(CONTACT_DRAFT_KEY);if(d){delete d._t;contactDraft=d;}return d;}
+function contactDraftAttach(){
+  const m=document.querySelector('#modal-root .modal');if(!m)return;
+  const f=()=>setTimeout(()=>{if(currentContactModalMode==='new'){captureContactDraft();contactDraftPersist();}},0);
+  m.addEventListener('input',f);m.addEventListener('change',f);m.addEventListener('click',f);
 }
 function renderGuide(){
   const el=document.getElementById('page-guide');
