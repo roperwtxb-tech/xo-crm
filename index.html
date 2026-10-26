@@ -35,6 +35,7 @@
   --color-border-tertiary:rgba(255,255,255,0.1);--color-border-secondary:rgba(255,255,255,0.18);--color-border-primary:rgba(255,255,255,0.28);--color-border-info:#185fa5;
 }
 body{font-family:var(--font-sans);font-size:14px;color:var(--color-text-primary);background:var(--color-background-tertiary);min-height:100vh}
+table.enroll-hist th,table.enroll-hist td{padding:6px 6px}
 #login-screen{display:flex;align-items:center;justify-content:center;min-height:100vh;background:var(--color-background-tertiary)}
 #firstlogin-screen{display:none;align-items:center;justify-content:center;min-height:100vh;background:var(--color-background-tertiary)}
 .login-card{background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-xl);padding:40px;width:360px;max-width:90vw}
@@ -422,6 +423,7 @@ function normalizeDB(){
     if(o.payPhone===undefined) o.payPhone='';
     if(o.fte===undefined) o.fte='';
     if(o.participating===undefined) o.participating='';
+    simrpSeedHistory(o);
     if(o.payFreq===undefined) o.payFreq='';
     if(o.language===undefined) o.language='';
     if(!o.qualify||typeof o.qualify!=='object') o.qualify={w2:false,fulltime:false,insurance:false};
@@ -1885,7 +1887,7 @@ function renderSimrp(){
           ${orgs.map(o=>`<div class="deal-card" onclick="openSimrpDetail('${o.id}')">
             <div style="font-size:13px;font-weight:500;margin-bottom:4px">${o.name}</div>
             <div style="font-size:11px;color:var(--color-text-secondary)"><span class="badge ${SIMRP_TYPE_BADGE[o.type]||'badge-gray'}" style="font-size:10px">${o.type||'—'}</span>${o.county?' · '+o.county:''}</div>
-            ${snum(o.participating)?`<div style="margin-top:6px;font-size:12px;color:var(--color-text-secondary)">${snum(o.participating)} enrolled · <span style="color:var(--brand);font-weight:500">${fmt(simrpMyMonthly(o))}/mo</span></div>`:''}
+            ${snum(o.participating)?`<div style="margin-top:6px;font-size:12px;color:var(--color-text-secondary)">${snum(o.participating)} enrolled${(()=>{const d=simrpLastChange(o);return d?` <span style="font-size:11px;color:${d>0?'var(--brand)':'var(--color-text-danger)'}">(${d>0?'+':''}${d})</span>`:'';})()} · <span style="color:var(--brand);font-weight:500">${fmt(simrpMyMonthly(o))}/mo</span></div>`:''}
             ${stage==='Deferred'&&o.deferUntil?`<div style="margin-top:4px;font-size:11px;color:var(--color-text-warning)">Follow up ${fmtDate(o.deferUntil)}</div>`:''}
           </div>`).join('')}
           <button class="btn btn-sm" style="width:100%;justify-content:center;color:var(--color-text-secondary);border-style:dashed" onclick="openSimrpModal('','${stage}')"><i class="ti ti-plus"></i> Add</button>
@@ -1930,6 +1932,87 @@ function simrpSplitRowHtml(s){
   </div>`;
 }
 function simrpAddSplitRow(){document.getElementById('s-splits').insertAdjacentHTML('beforeend',simrpSplitRowHtml());}
+/* ---------- SIMRP enrollment history (Oct 26, 2026) ----------
+   o.enrollHistory = [{id, date:'YYYY-MM-DD', count, eligible:'' | number, note, created}]
+   The latest entry (by date) drives o.participating so the rest of the CRM stays in sync. */
+function simrpToday(){const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
+function escH(v){return (v==null?'':(''+v)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function simrpSeedHistory(o){
+  if(!Array.isArray(o.enrollHistory)) o.enrollHistory=[];
+  if(!o.enrollHistory.length && snum(o.participating)>0){
+    const d=o.enrollDate||(o.startMonth?o.startMonth+'-01':'')||simrpToday();
+    o.enrollHistory.push({id:uid(),date:d,count:snum(o.participating),eligible:'',note:'Starting count (carried over)',created:Date.now()});
+  }
+}
+function simrpHist(o){return (o.enrollHistory||[]).map((h,i)=>({h,i})).sort((a,b)=>(a.h.date||'').localeCompare(b.h.date||'')||((a.h.created||0)-(b.h.created||0))||(a.i-b.i)).map(x=>x.h);}
+function simrpLatest(o){const h=simrpHist(o);return h.length?h[h.length-1]:null;}
+function simrpRate(e){return (e&&snum(e.eligible)>0)?Math.round(snum(e.count)/snum(e.eligible)*100):null;}
+function simrpSyncParticipating(o){const l=simrpLatest(o);if(l)o.participating=snum(l.count);}
+function simrpLastChange(o){const h=simrpHist(o);if(h.length<2)return null;return snum(h[h.length-1].count)-snum(h[h.length-2].count);}
+function simrpDeltaHtml(d){if(d===null||d===undefined)return '<span style="color:var(--color-text-tertiary)">—</span>';if(d===0)return '<span style="color:var(--color-text-secondary)">no change</span>';return d>0?`<span style="color:var(--brand);font-weight:500">▲ +${d}</span>`:`<span style="color:var(--color-text-danger);font-weight:500">▼ ${d}</span>`;}
+function simrpSparkline(o){
+  const h=simrpHist(o);if(h.length<3)return '';
+  const W=520,H=60,P=8,vals=h.map(e=>snum(e.count));
+  let mn=Math.min(...vals),mx=Math.max(...vals);if(mn===mx){mn-=1;mx+=1;}
+  const x=i=>P+i*(W-2*P)/(h.length-1),y=v=>H-P-(v-mn)*(H-2*P)/(mx-mn);
+  const pts=vals.map((v,i)=>x(i).toFixed(1)+','+y(v).toFixed(1)).join(' ');
+  const dots=vals.map((v,i)=>`<circle cx="${x(i).toFixed(1)}" cy="${y(v).toFixed(1)}" r="3" fill="var(--brand)"><title>${fmtDate(h[i].date)}: ${v}</title></circle>`).join('');
+  return `<div style="margin-bottom:10px"><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%;height:60px;display:block" aria-label="Enrollment trend"><polyline points="${pts}" fill="none" stroke="var(--brand)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>${dots}</svg>
+  <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--color-text-tertiary)"><span>${fmtDate(h[0].date)} · ${vals[0]}</span><span>${fmtDate(h[h.length-1].date)} · ${vals[vals.length-1]}</span></div></div>`;
+}
+function simrpHistoryHtml(o){
+  const h=simrpHist(o);
+  const rows=h.map((e,i)=>{const prev=i?snum(h[i-1].count):null;const d=prev===null?null:snum(e.count)-prev;const r=simrpRate(e);
+    return `<tr><td style="white-space:nowrap">${fmtDate(e.date)}</td><td style="font-weight:500">${snum(e.count)}</td><td>${simrpDeltaHtml(d)}</td><td>${snum(e.eligible)>0?snum(e.eligible):'—'}</td><td>${r===null?'—':r+'%'}</td><td style="color:var(--color-text-secondary);min-width:140px">${escH(e.note)}</td><td style="white-space:nowrap;text-align:right;padding-left:4px;padding-right:0"><button class="btn btn-sm" style="padding:3px 6px" title="Edit" aria-label="Edit" onclick="openEnrollUpdateModal('${o.id}','${e.id}')"><i class="ti ti-pencil"></i></button><button class="btn btn-sm" style="padding:3px 6px;margin-left:4px" title="Delete" aria-label="Delete" onclick="simrpDeleteEnroll('${o.id}','${e.id}')"><i class="ti ti-trash"></i></button></td></tr>`;}).reverse().join('');
+  return `<div class="modal-section"><div class="modal-section-title" style="display:flex;justify-content:space-between;align-items:center">Enrollment history <button class="btn btn-sm btn-primary" onclick="openEnrollUpdateModal('${o.id}')"><i class="ti ti-plus"></i> Add update</button></div>
+    ${h.length?simrpSparkline(o)+`<div style="overflow-x:auto"><table class="enroll-hist" style="font-size:12px"><thead><tr><th>Date</th><th>Enrolled</th><th>Change</th><th>Eligible</th><th>Rate</th><th>Note</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`
+      :'<p style="font-size:13px;color:var(--color-text-secondary);margin-bottom:0">No enrollment counts yet. When Attentive sends a new number, click <strong>Add update</strong> to log it and start tracking the trend.</p>'}
+  </div>`;
+}
+function openEnrollUpdateModal(orgId,entryId=''){
+  const o=DB.simrp.find(x=>x.id===orgId);if(!o)return;
+  const e=entryId?(o.enrollHistory||[]).find(x=>x.id===entryId):null;
+  const last=simrpLatest(o);
+  const elig=e?e.eligible:((last&&snum(last.eligible)>0)?last.eligible:(o.fte||''));
+  showModal(`<div class="modal-header"><h2>${e?'Edit enrollment update':'Enrollment update'} · ${escH(o.name)}</h2><button class="btn btn-sm" onclick="openSimrpDetail('${orgId}')"><i class="ti ti-x"></i></button></div>
+  <div class="modal-body">
+    ${!e&&last?`<div style="font-size:12px;color:var(--color-text-secondary);margin-bottom:12px">Last update: <strong>${snum(last.count)}</strong> enrolled on ${fmtDate(last.date)}${snum(last.eligible)>0?` (of ${snum(last.eligible)} eligible)`:''}</div>`:''}
+    <div class="form-row"><div class="form-group" style="margin:0"><label>Date</label><input id="eu-date" type="date" value="${sattr(e?e.date:simrpToday())}"/></div>
+    <div class="form-group" style="margin:0"><label>Enrolled (participants) *</label><input id="eu-count" type="number" min="0" value="${e?snum(e.count):''}" placeholder="e.g. 55" oninput="simrpEuPreview()"/></div></div>
+    <div class="form-group"><label>Eligible employees <span style="color:var(--color-text-tertiary)">— optional, for the participation rate</span></label><input id="eu-elig" type="number" min="0" value="${sattr(snum(elig)>0?elig:'')}" placeholder="e.g. 80" oninput="simrpEuPreview()"/></div>
+    <div id="eu-preview" style="font-size:12px;color:var(--color-text-secondary);margin:-4px 0 12px;min-height:16px"></div>
+    <div class="form-group"><label>Note <span style="color:var(--color-text-tertiary)">— optional</span></label><input id="eu-note" value="${sattr(e?e.note:'')}" placeholder="e.g. Re-enrollment, per Attentive"/></div>
+  </div>
+  <div class="modal-footer"><button class="btn" onclick="openSimrpDetail('${orgId}')">Cancel</button><button class="btn btn-primary" onclick="simrpSaveEnroll('${orgId}','${entryId}')">Save</button></div>`);
+  simrpEuPreview();
+}
+function simrpEuPreview(){const el=document.getElementById('eu-preview');if(!el)return;const c=document.getElementById('eu-count').value,g=document.getElementById('eu-elig').value;const r=simrpRate({count:c,eligible:g});el.textContent=(c!==''&&r!==null)?`Participation rate: ${r}% (${snum(c)} of ${snum(g)})`:'';}
+function simrpSaveEnroll(orgId,entryId){
+  const o=DB.simrp.find(x=>x.id===orgId);if(!o)return;
+  const date=document.getElementById('eu-date').value,cRaw=document.getElementById('eu-count').value,gRaw=document.getElementById('eu-elig').value;
+  if(!date){alert('Please pick a date.');return;}
+  if(cRaw===''||isNaN(parseInt(cRaw))||parseInt(cRaw)<0){alert('Please enter the number enrolled.');return;}
+  const count=parseInt(cRaw),eligible=parseInt(gRaw)>0?parseInt(gRaw):'',note=document.getElementById('eu-note').value.trim();
+  if(!Array.isArray(o.enrollHistory))o.enrollHistory=[];
+    if(entryId){const e=o.enrollHistory.find(x=>x.id===entryId);if(e)Object.assign(e,{date,count,eligible,note});}
+  else{
+    const ne={id:uid(),date,count,eligible,note,created:Date.now()};o.enrollHistory.push(ne);
+    const hs=simrpHist(o),pi=hs.indexOf(ne)-1,beforeCount=pi>=0?snum(hs[pi].count):null;
+    if(!o.activities)o.activities=[];
+    const r=simrpRate({count,eligible});
+    o.activities.push({date:simrpToday(),type:'Enrollment',text:`Enrollment ${beforeCount===null?'':beforeCount+' → '}${count}${beforeCount===null||count===beforeCount?'':` (${count>beforeCount?'+':''}${count-beforeCount})`}${r!==null?` · ${r}% of ${eligible} eligible`:''}${note?' — '+note:''}${date!==simrpToday()?` (as of ${fmtDate(date)})`:''}`});
+  }
+  simrpSyncParticipating(o);
+  save();openSimrpDetail(orgId);renderSimrp();showToast('Enrollment updated','ok');
+}
+function simrpDeleteEnroll(orgId,entryId){
+  const o=DB.simrp.find(x=>x.id===orgId);if(!o)return;
+  const e=(o.enrollHistory||[]).find(x=>x.id===entryId);if(!e)return;
+  if(!confirm(`Delete the ${fmtDate(e.date)} update (${snum(e.count)} enrolled)?`))return;
+  o.enrollHistory=o.enrollHistory.filter(x=>x.id!==entryId);
+  if(o.enrollHistory.length)simrpSyncParticipating(o);
+  save();openSimrpDetail(orgId);renderSimrp();
+}
 function openSimrpModal(id='',defaultStage='Lead'){
   const o=id?DB.simrp.find(x=>x.id===id):{};
   const q=o.qualify||{};
@@ -1957,7 +2040,7 @@ function openSimrpModal(id='',defaultStage='Lead'){
 
     <div class="modal-section-title" style="border-top:0.5px solid var(--color-border-tertiary);padding-top:12px">Plan details</div>
     <div class="form-row"><div class="form-group" style="margin:0"><label>Full-time employees</label><input id="s-fte" type="number" value="${(o.fte===''||o.fte==null)?'':o.fte}" placeholder="0"/></div>
-    <div class="form-group" style="margin:0"><label>Participating (enrolled)</label><input id="s-part" type="number" value="${(o.participating===''||o.participating==null)?'':o.participating}" placeholder="0"/></div></div>
+    <div class="form-group" style="margin:0"><label>Participating (enrolled) <span style="color:var(--color-text-tertiary)">— a change here is logged in Enrollment history</span></label><input id="s-part" type="number" value="${(o.participating===''||o.participating==null)?'':o.participating}" placeholder="0"/></div></div>
     <div class="form-row"><div class="form-group" style="margin:0"><label>Pay frequency</label><select id="s-freq"><option value="">—</option>${PAY_FREQS.map(f=>`<option ${o.payFreq===f?'selected':''}>${f}</option>`).join('')}</select></div>
     <div class="form-group" style="margin:0"><label>Preferred language</label><select id="s-lang"><option value="">—</option>${SIMRP_LANGS.map(l=>`<option ${o.language===l?'selected':''}>${l}</option>`).join('')}</select></div></div>
     <div class="form-group"><label>Qualification</label><div class="chk-grid">
@@ -1988,6 +2071,13 @@ function openSimrpModal(id='',defaultStage='Lead'){
     <div class="form-group"><label>Participation summary / roster link</label><input id="s-roster" value="${sattr(o.rosterLink)}" placeholder="https://..."/></div>
   </div>
   <div class="modal-footer"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="saveSimrpOrg('${id}')">Save</button></div>`);
+}
+function simrpEditFormHistory(ex,data){
+  if(!ex)return;if(!Array.isArray(ex.enrollHistory))ex.enrollHistory=[];
+  const nv=snum(data.participating),last=simrpLatest(ex);
+  if(!last){if(nv>0)ex.enrollHistory.push({id:uid(),date:data.enrollDate||simrpToday(),count:nv,eligible:'',note:'Starting count',created:Date.now()});return;}
+  if(nv!==snum(last.count)){ex.enrollHistory.push({id:uid(),date:simrpToday(),count:nv,eligible:snum(last.eligible)>0?last.eligible:'',note:'Changed on Edit form',created:Date.now()});
+    if(!ex.activities)ex.activities=[];const d=nv-snum(last.count);ex.activities.push({date:simrpToday(),type:'Enrollment',text:`Enrollment ${snum(last.count)} → ${nv} (${d>0?'+':''}${d})`});}
 }
 function saveSimrpOrg(id){
   const name=document.getElementById('s-name').value.trim();if(!name){alert('Organization name required.');return;}
@@ -2031,7 +2121,7 @@ function saveSimrpOrg(id){
     rosterLink:document.getElementById('s-roster').value.trim(),
     splits:splits.length?splits:[{name:meName,role:'Me (agent)',rate:'',me:true}]
   };
-  if(id){const ex=DB.simrp.find(x=>x.id===id);if(ex&&ex.stage!==data.stage){if(!ex.activities)ex.activities=[];ex.activities.push({date:new Date().toISOString().slice(0,10),type:'Stage',text:'→ '+data.stage});data.stageChangedAt=Date.now();}Object.assign(ex,data);}else{DB.simrp.push({id:uid(),...data,activities:[],notes:[],created:Date.now(),stageChangedAt:Date.now()});}
+  if(id){const ex=DB.simrp.find(x=>x.id===id);simrpEditFormHistory(ex,data);if(ex&&ex.stage!==data.stage){if(!ex.activities)ex.activities=[];ex.activities.push({date:new Date().toISOString().slice(0,10),type:'Stage',text:'→ '+data.stage});data.stageChangedAt=Date.now();}Object.assign(ex,data);}else{const no={id:uid(),...data,activities:[],notes:[],created:Date.now(),stageChangedAt:Date.now()};simrpSeedHistory(no);DB.simrp.push(no);}
   save();closeModal();renderSimrp();
 }
 function openSimrpDetail(id){
@@ -2048,7 +2138,7 @@ function openSimrpDetail(id){
       ${o.county?`<span style="font-size:12px;color:var(--color-text-secondary)">${o.county} County</span>`:''}
     </div>
     <div class="grid-2" style="gap:10px;margin-bottom:14px">
-      <div class="metric-card"><div class="metric-label">Participating</div><div class="metric-value" style="font-size:18px">${snum(o.participating)||0}${o.fte?` <span style="font-size:12px;color:var(--color-text-secondary)">/ ${o.fte}</span>`:''}</div></div>
+      <div class="metric-card"><div class="metric-label">Participating${simrpRate(simrpLatest(o))!==null?' · rate':''}</div><div class="metric-value" style="font-size:18px">${snum(o.participating)||0}${(()=>{const l=simrpLatest(o),r=simrpRate(l);return r!==null?` <span style="font-size:12px;color:var(--color-text-secondary)">/ ${snum(l.eligible)} · <strong style="color:var(--brand)">${r}%</strong></span>`:(o.fte?` <span style="font-size:12px;color:var(--color-text-secondary)">/ ${o.fte}</span>`:'');})()}</div>${simrpLastChange(o)!==null?`<div style="font-size:11px;margin-top:2px">${simrpDeltaHtml(simrpLastChange(o))} <span style="color:var(--color-text-tertiary)">since last update</span></div>`:''}</div>
       <div class="metric-card"><div class="metric-label">My monthly / annual</div><div class="metric-value" style="font-size:18px">${fmt(simrpMyMonthly(o))} <span style="font-size:12px;color:var(--color-text-secondary)">/ ${fmt(simrpMyMonthly(o)*12)}</span></div></div>
     </div>
     <div style="font-size:12px;margin-bottom:14px">${qBadge(q.w2,'W-2')}${qBadge(q.fulltime,'Full-time')}${qBadge(q.insurance,'Insurance')}${o.has401a?'<span class="badge badge-blue" style="margin-left:4px">401(a)</span>':''}</div>
@@ -2080,6 +2170,8 @@ function openSimrpDetail(id){
         ${info('Admin fee',o.adminFee?`${fmt(o.adminFee)}/mo (${fmt(o.feeEmployee||0)} EE / ${fmt(o.feeEmployer||0)} ER)`:'')}
       </div>
     </div>
+
+    ${simrpHistoryHtml(o)}
 
     <div class="modal-section"><div class="modal-section-title">Compensation</div>
       <table><thead><tr><th>Person</th><th>Role</th><th>Rate</th><th>Monthly</th></tr></thead><tbody>${splitRows}</tbody>
