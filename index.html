@@ -148,6 +148,15 @@ tr:hover .contact-name{text-decoration:underline}
 .empty-state i{font-size:32px;margin-bottom:10px;display:block;opacity:0.4}
 .note-item{padding:10px 12px;border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);margin-bottom:8px}
 .note-date{font-size:11px;color:var(--color-text-tertiary);margin-bottom:4px}
+.contact-bar{border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);padding:4px 12px;margin-bottom:14px}
+.cb-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:0.5px solid var(--color-border-tertiary)}
+.cb-row:last-child{border-bottom:none}
+.cb-ico{font-size:18px;color:var(--brand);flex-shrink:0}
+.cb-val{flex:1;min-width:0;font-size:16px;color:var(--color-text-primary);word-break:break-word}
+.cb-muted{color:var(--color-text-tertiary);font-size:14px}
+.cb-lbl{font-size:11px;color:var(--color-text-secondary);text-transform:uppercase;letter-spacing:.03em;margin-right:4px}
+.cb-btns{display:flex;gap:6px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end}
+@media(max-width:640px){.cb-row{flex-wrap:wrap}.cb-val{flex-basis:calc(100% - 30px)}.cb-btns{width:100%;justify-content:flex-start;padding-left:28px}}
 .info-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px 16px;margin-bottom:8px}
 .info-item{font-size:13px}
 .info-item .lbl{font-size:11px;color:var(--color-text-secondary);display:block;margin-bottom:1px}
@@ -283,7 +292,6 @@ const USERS = {
   sroper:   { name: 'Sean Roper',   email: 'sroper@xo-crm.local' },
   cdanaher: { name: 'Cody Danaher', email: 'cdanaher@xo-crm.local' },
   cmiller:  { name: 'Colby Miller', email: 'cmiller@xo-crm.local' },
-  rbrown:   { name: 'Randy Brown',  email: 'rbrown@xo-crm.local' },
   sbrandt:  { name: 'Sam Brandt',   email: 'sbrandt@xo-crm.local' },
 };
 let CURRENT_USER = null;
@@ -327,7 +335,7 @@ async function setFirstPassword(){
   const p2 = document.getElementById('newpw2').value;
   const err = document.getElementById('firstpw-error');
   err.style.display='none';
-  if(!p1 || p1.length < 6){ err.textContent='Password must be at least 6 characters.'; err.style.display='block'; return; }
+  if(!p1 || p1.length < 8){ err.textContent='Password must be at least 8 characters.'; err.style.display='block'; return; }
   if(p1 !== p2){ err.textContent='Passwords do not match.'; err.style.display='block'; return; }
   const { error } = await sb.auth.updateUser({ password: p1, data: { must_change_password: false } });
   if(error){ err.textContent = error.message || 'Could not set password.'; err.style.display='block'; return; }
@@ -525,7 +533,7 @@ function defaultWorkflows(){
       {title:'30-day check-in call',offsetDays:30,priority:'Medium'},
       {title:'First annual review',offsetDays:365,priority:'Low'}
     ]},
-    {id:uid(),name:'New Lead Follow-up',trigger:'Lead',steps:[
+    {id:uid(),name:'New Lead Follow-up',trigger:'',steps:[
       {title:'Initial outreach to lead',offsetDays:0,priority:'High'},
       {title:'Follow-up call',offsetDays:3,priority:'Medium'},
       {title:'Send product information',offsetDays:7,priority:'Medium'},
@@ -1189,6 +1197,50 @@ function openRetireCalc(id){
   const url='https://xo-retirement-gap.netlify.app/?client='+encodeURIComponent(c.name||'');
   window.open(url,'_blank','noopener');
 }
+// ── Contact bar (Nov 3, 2026): big, readable phone / email / address with action buttons ──
+// Phone → Text and Call open the Quo app (openphone:// links); Email → Gmail compose; Copy on everything.
+function cbPhoneE164(p){const d=(p||'').replace(/\D/g,'');if(d.length===10)return '+1'+d;if(d.length===11&&d[0]==='1')return '+'+d;return d?('+'+d):'';}
+function cbQuo(kind,phone){const n=cbPhoneE164(phone);if(!n){showToast('No phone number on file','err');return;}window.location.href='openphone://'+kind+'?number='+encodeURIComponent(n);}
+function cbGmail(id){
+  const c=DB.contacts.find(x=>x.id===id);if(!c||!c.email)return;
+  const L=DB.rollLetter||{};
+  let u='https://mail.google.com/mail/?view=cm&fs=1&to='+encodeURIComponent(c.email);
+  if(L.email&&/@/.test(L.email))u+='&authuser='+encodeURIComponent(L.email);
+  window.open(u,'_blank','noopener');
+}
+function cbCopy(text,label){
+  const done=()=>showToast(label+' copied','ok');
+  const fallback=()=>{const t=document.createElement('textarea');t.value=text;t.style.position='fixed';t.style.opacity='0';document.body.appendChild(t);t.select();let ok=false;try{ok=document.execCommand('copy');}catch(e){}t.remove();ok?done():prompt('Copy this:',text);};
+  if(navigator.clipboard&&navigator.clipboard.writeText&&window.isSecureContext)navigator.clipboard.writeText(text).then(done).catch(fallback);else fallback();
+}
+function cbCopyField(id,field,label){
+  const c=DB.contacts.find(x=>x.id===id);if(!c)return;
+  let v='';
+  if(field==='phone')v=c.phone||'';
+  else if(field==='email')v=c.email||'';
+  else if(field==='addr')v=[c.address,[[c.city,c.state].filter(Boolean).join(', '),c.zip].filter(Boolean).join(' ')].filter(Boolean).join(', ');
+  else if(field==='mail')v=[c.mailAddress,[[c.mailCity,c.mailState].filter(Boolean).join(', '),c.mailZip].filter(Boolean).join(' ')].filter(Boolean).join(', ');
+  if(v)cbCopy(v,label);
+}
+function contactBarHtml(c,addr,mailDiff){
+  const row=(icon,value,btns,muted)=>`<div class="cb-row"><i class="ti ${icon} cb-ico"></i><div class="cb-val${muted?' cb-muted':''}">${value}</div><div class="cb-btns">${btns}</div></div>`;
+  const b=(icon,label,onclick,title)=>`<button class="btn btn-sm" onclick="${onclick}" title="${title||label}"><i class="ti ${icon}"></i> ${label}</button>`;
+  const rows=[];
+  if(c.phone)rows.push(row('ti-phone',rEsc(c.phone),
+    b('ti-message','Text',`cbQuo('message','${rEsc(c.phone).replace(/'/g,'')}')`,'Open a text to this number in Quo')+
+    b('ti-phone-call','Call',`cbQuo('dial','${rEsc(c.phone).replace(/'/g,'')}')`,'Open the Quo dialer with this number')+
+    b('ti-copy','Copy',`cbCopyField('${c.id}','phone','Phone number')`,'Copy phone number')));
+  else rows.push(row('ti-phone','No phone on file','',true));
+  if(c.email)rows.push(row('ti-mail',rEsc(c.email),
+    b('ti-send','Email',`cbGmail('${c.id}')`,'Open a new Gmail message to this address')+
+    b('ti-copy','Copy',`cbCopyField('${c.id}','email','Email address')`,'Copy email address')));
+  else rows.push(row('ti-mail','No email on file','',true));
+  if(addr)rows.push(row('ti-map-pin',(mailDiff?'<span class="cb-lbl">Street</span> ':'')+rEsc(addr),
+    b('ti-copy','Copy',`cbCopyField('${c.id}','addr','Address')`,'Copy address')));
+  if(mailDiff)rows.push(row('ti-mailbox','<span class="cb-lbl">Mailing</span> '+rEsc([c.mailAddress,[c.mailCity,c.mailState].filter(Boolean).join(', '),c.mailZip].filter(Boolean).join(' · ')),
+    b('ti-copy','Copy',`cbCopyField('${c.id}','mail','Mailing address')`,'Copy mailing address')));
+  return `<div class="contact-bar">${rows.join('')}</div>`;
+}
 function openContactDetail(id){
   const c=DB.contacts.find(x=>x.id===id);if(!c)return;
   const cd=DB.deals.filter(d=>d.contactId===id),cr=(DB.rollovers||[]).filter(r=>r.contactId===id),ct=DB.tasks.filter(t=>t.contactId===id),ce=DB.emails.filter(e=>e.contactId===id);
@@ -1205,8 +1257,6 @@ function openContactDetail(id){
   info.push(['Client since',c.clientSince?`${fmtDate(c.clientSince)} ${calLink(gcalAnniv(c.name,c.clientSince))}`:'—']);
   if(c.spouseName)info.push(['Spouse',`${c.spouseName}${c.spouseBirthday?' · '+fmtMD(c.spouseBirthday)+' '+calLink(gcalBirthday(c.spouseName,c.spouseBirthday,c.name)):''}`]);
   const mailDiff=c.mailSame===false&&(c.mailAddress||c.mailCity||c.mailZip);
-  if(addr)info.push([mailDiff?'Street address':'Address',addr]);
-  if(mailDiff)info.push(['Mailing address',[c.mailAddress,[c.mailCity,c.mailState].filter(Boolean).join(', '),c.mailZip].filter(Boolean).join(' · ')]);
   const childrenHtml=(c.children&&c.children.length)?`<div class="info-item" style="grid-column:1/-1"><span class="lbl">Children</span>${c.children.map(ch=>`${ch.name}${ch.birthday?' ('+fmtMD(ch.birthday)+') '+calLink(gcalBirthday(ch.name,ch.birthday,c.name)):''}`).join(', ')}</div>`:'';
   const interestsHtml=(c.interests&&c.interests.length)?`<div style="margin-bottom:10px;display:flex;flex-wrap:wrap;gap:6px">${c.interests.map(i=>`<span class="badge badge-purple">${i}</span>`).join('')}</div>`:'';
   const policiesHtml=(c.policies&&c.policies.length)?`<div class="modal-section"><div class="modal-section-title">Policies (${c.policies.length})</div>${c.policies.map(p=>`<div style="padding:8px 0;border-bottom:0.5px solid var(--color-border-tertiary)"><div style="font-size:13px;font-weight:500">${p.company||'—'} <span class="badge badge-blue" style="margin-left:4px">${p.product||''}</span></div><div style="font-size:11px;color:var(--color-text-secondary)">Policy #${p.number||'—'}${p.effective?' · effective '+fmtDate(p.effective):''}</div></div>`).join('')}</div>`:'';
@@ -1217,9 +1267,10 @@ function openContactDetail(id){
   <div class="modal-body">
     <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
       <div class="avatar" style="width:44px;height:44px;font-size:14px;background:${avatarColor(c.name)};color:${avatarText(c.name)}">${initials(c.name)}</div>
-      <div style="flex:1;min-width:0"><div style="font-weight:500;font-size:15px">${c.name}${c.goesBy?` <span style="font-weight:400;color:var(--color-text-secondary)">goes by ${rEsc(c.goesBy)}</span>`:''}</div><div style="font-size:12px;color:var(--color-text-secondary);overflow:hidden;text-overflow:ellipsis">${c.email||'—'}${c.phone?' · '+c.phone:''}</div></div>
+      <div style="flex:1;min-width:0"><div style="font-weight:500;font-size:15px">${c.name}${c.goesBy?` <span style="font-weight:400;color:var(--color-text-secondary)">goes by ${rEsc(c.goesBy)}</span>`:''}</div></div>
       <span class="badge ${REL_COLORS[c.stage]||'badge-gray'}">${c.stage}</span>
     </div>
+    ${contactBarHtml(c,addr,mailDiff)}
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;padding:8px 10px;background:var(--color-background-secondary);border-radius:8px;flex-wrap:wrap">
       <i class="ti ti-bell" style="color:var(--brand)"></i>
       <span style="font-size:12px;color:var(--color-text-secondary)">Next follow-up:</span>
@@ -1783,7 +1834,7 @@ async function changePassword(){
   const conf=document.getElementById('pw-confirm').value;
   if(!pw){alert('Enter a new password.');return;}
   if(pw!==conf){alert('Passwords do not match.');return;}
-  if(pw.length<6){alert('Password must be at least 6 characters.');return;}
+  if(pw.length<8){alert('Password must be at least 8 characters.');return;}
   const { error } = await sb.auth.updateUser({ password: pw });
   if(error){ alert(error.message || 'Could not update password.'); return; }
   alert('Password updated!');
