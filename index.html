@@ -104,7 +104,8 @@ label{display:block;font-size:12px;color:var(--color-text-secondary);margin-bott
 .tagchip.on{background:var(--color-background-info);color:var(--color-text-info);border-color:transparent;font-weight:600}
 .taggroup-lbl{font-size:11px;font-weight:600;color:var(--color-text-secondary);margin-bottom:5px}
 .rep-row{display:grid;grid-template-columns:1fr 150px auto;gap:6px;margin-bottom:6px;align-items:center}
-.rep-policy{grid-template-columns:1fr 130px 1fr 140px auto}
+.rep-policy{grid-template-columns:150px 1fr 1fr;padding-bottom:8px;border-bottom:0.5px solid var(--color-border-tertiary);margin-bottom:8px}
+.rep-policy>button{justify-self:end}
 .wf-row{display:grid;grid-template-columns:1fr 84px 110px auto;gap:6px;margin-bottom:6px;align-items:center}
 .chk-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .chk{display:flex;align-items:center;gap:7px;font-size:13px;color:var(--color-text-primary);margin:0;cursor:pointer}
@@ -399,6 +400,7 @@ function normalizeDB(){
     if(!Array.isArray(c.children)) c.children=[];
     if(!Array.isArray(c.interests)) c.interests=[];
     if(!Array.isArray(c.policies)) c.policies=[];
+    c.policies.forEach(p=>{if(p&&p.type===undefined)p.type=guessPolicyType(p);});
     if(!Array.isArray(c.notes)) c.notes=[];
     if(!Array.isArray(c.activities)) c.activities=[];
     if(c.nextFollowup===undefined) c.nextFollowup='';
@@ -508,6 +510,23 @@ const REF_STATUSES=[
 ];
 const REF_STATUS_MAP=Object.fromEntries(REF_STATUSES.map(s=>[s.k,s]));
 const VERTICALS=['School District','Educator','Coach','Private Sector','Other'];
+const POLICY_TYPES=['403(b)','Roth 403(b)','457(b)','IRA','Roth IRA','Annuity','IUL','Life Insurance','Final Expense','Other'];
+// Plan type for a policy (Nov 3, 2026). Only fills in when the name makes it certain; anything unclear stays blank for Sean to pick.
+function guessPolicyType(p){
+  const t=((p.product||'')+' '+(p.company||'')).toLowerCase();
+  if(/roth\s*403\s*\(?b\)?/.test(t))return 'Roth 403(b)';
+  if(/403\s*\(?b\)?/.test(t))return '403(b)';
+  if(/457\s*\(?b\)?/.test(t))return '457(b)';
+  if(/roth\s*ira\b/.test(t))return 'Roth IRA';
+  if(/\bira\b/.test(t))return 'IRA';
+  if(/\biul\b|indexed universal life|flexlife/.test(t))return 'IUL';
+  if(/final expense/.test(t))return 'Final Expense';
+  if(/whole life|term life/.test(t))return 'Life Insurance';
+  // Annuities default to 403(b) (Sean's call, Nov 3, 2026: most of his annuities sit inside a 403(b)); a "Roth" in the name → Roth 403(b).
+  // Sean fixes the exceptions (IRAs etc.) by hand. Only runs for policies that have never had a plan type.
+  if(/annuity|\bflex\s*s[gi]\b/.test(t))return /\broth\b/.test(t)?'Roth 403(b)':'403(b)';
+  return '';
+}
 const PRODUCTS=['403(b)','457(b)','Life Insurance','IUL','Final Expense','Annuity','IRA','Roth IRA','Other'];
 const TEMPLATE_CATS=['Cross-sell','Prospecting','Re-engage','Nurture','Seasonal','Other'];
 const AGE_BRACKETS=[
@@ -631,7 +650,7 @@ function ownsType(c,type){
   const key=(type==='Life Insurance')?'life':type.toLowerCase();
   if((c.interests||[]).some(i=>i.toLowerCase()===type.toLowerCase()))return true;
   if((c.interests||[]).some(i=>i.toLowerCase().includes(key)))return true;
-  return (c.policies||[]).some(p=>(p.product||'').toLowerCase().includes(key));
+  return (c.policies||[]).some(p=>((p.type||'')+' '+(p.product||'')).toLowerCase().includes(key));
 }
 function daysUntilAnnual(dateStr){if(!dateStr)return null;const d=new Date(dateStr+'T12:00:00');if(isNaN(d))return null;const now=new Date();const today=new Date(now.getFullYear(),now.getMonth(),now.getDate());let next=new Date(now.getFullYear(),d.getMonth(),d.getDate());if(next<today)next=new Date(now.getFullYear()+1,d.getMonth(),d.getDate());return Math.round((next-today)/864e5);}
 function whenLabel(days){if(days===0)return'Today';if(days===1)return'Tomorrow';return'in '+days+' days';}
@@ -1036,7 +1055,7 @@ function exportCSV(){
     const _nm=(c.name||'').trim();const _sp=_nm.indexOf(' ');const _first=_sp<0?_nm:_nm.slice(0,_sp);const _last=_sp<0?'':_nm.slice(_sp+1);
     const row=[_first,_last,c.name,c.email,c.phone,c.stage,c.vertical,c.district,c.address,c.city,c.state,c.zip,c.birthday,calcAge(c.birthday)??'',c.clientSince,c.spouseName,
       (c.interests||[]).join('; '),
-      (c.policies||[]).map(p=>`${p.company} ${p.product} ${p.number}`.trim()).join(' | '),
+      (c.policies||[]).map(p=>`${p.type?p.type+': ':''}${p.company||''} ${p.product||''} ${p.number||''}`.replace(/\s+/g,' ').trim()).join(' | '),
       c.tags||'',...cfKeys.map(k=>(c.custom&&c.custom[k])||''),...contactMailing(c),c.goesBy||''];
     return row.map(v=>`"${String(v==null?'':v).replace(/"/g,'""')}"`).join(',');
   });
@@ -1044,7 +1063,7 @@ function exportCSV(){
   const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='contacts_export.csv';a.click();
 }
 function childRowHTML(ch){ch=ch||{};return `<div class="rep-row"><input class="child-name" placeholder="Child name" value="${(ch.name||'').replace(/"/g,'&quot;')}"/><input class="child-bday" type="date" value="${ch.birthday||''}"/><button type="button" class="btn btn-sm btn-danger" onclick="this.closest('.rep-row').remove()"><i class="ti ti-x"></i></button></div>`;}
-function policyRowHTML(p){p=p||{};return `<div class="rep-row rep-policy"><input class="pol-company" placeholder="Company / carrier" value="${(p.company||'').replace(/"/g,'&quot;')}"/><input class="pol-product" placeholder="Product" value="${(p.product||'').replace(/"/g,'&quot;')}"/><input class="pol-number" placeholder="Policy #" value="${(p.number||'').replace(/"/g,'&quot;')}"/><input class="pol-eff" type="date" value="${p.effective||''}"/><button type="button" class="btn btn-sm btn-danger" onclick="this.closest('.rep-row').remove()"><i class="ti ti-x"></i></button></div>`;}
+function policyRowHTML(p){p=p||{};return `<div class="rep-row rep-policy"><select class="pol-type" title="Plan type"><option value="">Plan type…</option>${POLICY_TYPES.map(t=>`<option ${p.type===t?'selected':''}>${t}</option>`).join('')}</select><input class="pol-company" placeholder="Company / carrier" value="${(p.company||'').replace(/"/g,'&quot;')}"/><input class="pol-product" placeholder="Product" value="${(p.product||'').replace(/"/g,'&quot;')}"/><input class="pol-number" placeholder="Policy #" value="${(p.number||'').replace(/"/g,'&quot;')}"/><input class="pol-eff" type="date" value="${p.effective||''}"/><button type="button" class="btn btn-sm btn-danger" onclick="this.closest('.rep-row').remove()"><i class="ti ti-x"></i></button></div>`;}
 function addChildRow(){document.getElementById('children-list').insertAdjacentHTML('beforeend',childRowHTML());}
 function addPolicyRow(){document.getElementById('policy-list').insertAdjacentHTML('beforeend',policyRowHTML());}
 function openContactModal(id=''){
@@ -1114,7 +1133,7 @@ function openContactModal(id=''){
   if(!id) contactDraftAttach();
 }
 function collectChildren(){return [...document.querySelectorAll('#children-list .rep-row')].map(r=>({name:r.querySelector('.child-name').value.trim(),birthday:r.querySelector('.child-bday').value})).filter(c=>c.name);}
-function collectPolicies(){return [...document.querySelectorAll('#policy-list .rep-row')].map(r=>({company:r.querySelector('.pol-company').value.trim(),product:r.querySelector('.pol-product').value.trim(),number:r.querySelector('.pol-number').value.trim(),effective:r.querySelector('.pol-eff').value})).filter(p=>p.company||p.number);}
+function collectPolicies(){return [...document.querySelectorAll('#policy-list .rep-row')].map(r=>({type:r.querySelector('.pol-type').value,company:r.querySelector('.pol-company').value.trim(),product:r.querySelector('.pol-product').value.trim(),number:r.querySelector('.pol-number').value.trim(),effective:r.querySelector('.pol-eff').value})).filter(p=>p.company||p.number||p.product||p.type);}
 function collectInterests(){return PRODUCTS.filter((p,i)=>{const el=document.getElementById('int-'+i);return el&&el.checked;});}
 function captureContactDraft(){
   if(!document.getElementById('c-name'))return;
@@ -1259,7 +1278,7 @@ function openContactDetail(id){
   const mailDiff=c.mailSame===false&&(c.mailAddress||c.mailCity||c.mailZip);
   const childrenHtml=(c.children&&c.children.length)?`<div class="info-item" style="grid-column:1/-1"><span class="lbl">Children</span>${c.children.map(ch=>`${ch.name}${ch.birthday?' ('+fmtMD(ch.birthday)+') '+calLink(gcalBirthday(ch.name,ch.birthday,c.name)):''}`).join(', ')}</div>`:'';
   const interestsHtml=(c.interests&&c.interests.length)?`<div style="margin-bottom:10px;display:flex;flex-wrap:wrap;gap:6px">${c.interests.map(i=>`<span class="badge badge-purple">${i}</span>`).join('')}</div>`:'';
-  const policiesHtml=(c.policies&&c.policies.length)?`<div class="modal-section"><div class="modal-section-title">Policies (${c.policies.length})</div>${c.policies.map(p=>`<div style="padding:8px 0;border-bottom:0.5px solid var(--color-border-tertiary)"><div style="font-size:13px;font-weight:500">${p.company||'—'} <span class="badge badge-blue" style="margin-left:4px">${p.product||''}</span></div><div style="font-size:11px;color:var(--color-text-secondary)">Policy #${p.number||'—'}${p.effective?' · effective '+fmtDate(p.effective):''}</div></div>`).join('')}</div>`:'';
+  const policiesHtml=(c.policies&&c.policies.length)?`<div class="modal-section"><div class="modal-section-title">Policies (${c.policies.length})</div>${c.policies.map(p=>`<div style="padding:8px 0;border-bottom:0.5px solid var(--color-border-tertiary)"><div style="font-size:13px;font-weight:500;display:flex;align-items:center;gap:6px;flex-wrap:wrap">${p.type?`<span class="badge badge-green">${rEsc(p.type)}</span>`:`<span class="badge badge-gray" title="Edit the contact to pick a plan type">Type not set</span>`}<span>${rEsc(p.company||'—')}</span>${p.product?`<span class="badge badge-blue">${rEsc(p.product)}</span>`:''}</div><div style="font-size:11px;color:var(--color-text-secondary)">Policy #${p.number||'—'}${p.effective?' · effective '+fmtDate(p.effective):''}</div></div>`).join('')}</div>`:'';
   const hh=c.household?DB.contacts.filter(x=>x.household===c.household&&x.id!==c.id):[];
   const householdHtml=hh.length?`<div class="modal-section"><div class="modal-section-title">Household · ${c.household} (${hh.length+1} people)</div>${hh.map(m=>`<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:0.5px solid var(--color-border-tertiary);cursor:pointer" onclick="openContactDetail('${m.id}')"><div class="avatar" style="width:26px;height:26px;font-size:10px;background:${avatarColor(m.name)};color:${avatarText(m.name)}">${initials(m.name)}</div><div style="flex:1;min-width:0"><span class="contact-name" style="font-size:13px;color:var(--color-text-info)">${m.name}</span> <span class="badge ${REL_COLORS[m.stage]||'badge-gray'}" style="margin-left:4px">${m.stage}</span></div></div>`).join('')}</div>`:'';
   const wfHtml=(DB.workflows&&DB.workflows.length)?`<div class="modal-section"><div class="modal-section-title">Run a workflow</div><div style="display:flex;gap:8px"><select id="wf-apply" style="flex:1">${DB.workflows.map(w=>`<option value="${w.id}">${w.name} (${w.steps.length} tasks)</option>`).join('')}</select><button class="btn btn-sm btn-primary" onclick="runWorkflowManual(document.getElementById('wf-apply').value,'${id}')"><i class="ti ti-player-play"></i> Apply</button></div></div>`:'';
