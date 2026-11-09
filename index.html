@@ -131,6 +131,15 @@ tr:hover .contact-name{text-decoration:underline}
 .deal-card:hover{border-color:var(--color-border-secondary)}
 .task-item{display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:0.5px solid var(--color-border-tertiary)}
 .task-item:last-child{border-bottom:none}
+.task-open{cursor:pointer;border-radius:6px;padding:2px 4px;margin:-2px -4px}
+.task-open:hover{background:var(--color-background-secondary)}
+.tsw{display:inline-flex;align-items:center;gap:8px;font-size:13px;color:var(--color-text-secondary);cursor:pointer;user-select:none}
+.tsw input{position:absolute;opacity:0;width:0;height:0}
+.tsw-track{position:relative;width:34px;height:20px;border-radius:10px;background:var(--color-border-secondary);transition:background .15s;flex-shrink:0}
+.tsw-knob{position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.25);transition:left .15s}
+.tsw input:checked + .tsw-track{background:var(--brand)}
+.tsw input:checked + .tsw-track .tsw-knob{left:16px}
+.tsw input:disabled + .tsw-track{opacity:.45}
 .task-check{width:18px;height:18px;border-radius:50%;border:0.5px solid var(--color-border-secondary);cursor:pointer;flex-shrink:0;margin-top:1px;display:flex;align-items:center;justify-content:center}
 .task-check.done{background:var(--color-background-success);border-color:transparent}
 .alert-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:0.5px solid var(--color-border-tertiary);cursor:pointer}
@@ -762,7 +771,7 @@ function renderDashboard(){
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px"><span style="font-size:13px;font-weight:500">Upcoming tasks</span><button class="btn btn-sm" onclick="showPage('tasks')">View all</button></div>
         ${pending.slice(0,5).map(t=>`<div class="task-item">
           <div class="task-check" onclick="toggleTask('${t.id}')"><i class="ti ti-check" style="font-size:10px;color:var(--color-text-secondary)"></i></div>
-          <div style="flex:1;min-width:0;cursor:pointer" onclick="openTaskModal('${t.id}')"><div style="font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.title}</div>
+          <div class="task-open" style="flex:1;min-width:0" onclick="openTaskView('${t.id}')"><div style="font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.title}</div>
           <div style="font-size:11px;color:${t.due<new Date().toISOString().slice(0,10)?'var(--color-text-danger)':'var(--color-text-secondary)'}">Due ${fmtDate(t.due)}${t.contactId?' · '+contactName(t.contactId):''}</div></div>
           ${calLink(gcalTask(t))}<span class="badge ${PRIORITY_COLORS[t.priority]||'badge-gray'}">${t.priority}</span>
         </div>`).join('')||'<div class="empty-state"><i class="ti ti-checkbox"></i>No pending tasks</div>'}
@@ -1326,7 +1335,7 @@ function detailTab(tab,id){
   else if(tab==='notes')dc.innerHTML=renderContactNotes(c);
   else if(tab==='deals')dc.innerHTML=`<div style="margin-top:8px">${DB.deals.filter(d=>d.contactId===id).map(d=>`<div style="padding:8px 0;border-bottom:0.5px solid var(--color-border-tertiary)"><span style="font-weight:500">${d.name}</span> <span class="badge ${STAGE_COLORS[d.stage]}">${d.stage}</span><span style="float:right;font-weight:500;color:var(--color-text-info)">${fmt(d.value)}</span></div>`).join('')||'<p style="color:var(--color-text-secondary);font-size:13px;margin-top:8px">No deals</p>'}</div>`;
   else if(tab==='rollovers')dc.innerHTML=rollContactTabHtml(id);
-  else if(tab==='tasks')dc.innerHTML=`<div style="margin-top:8px">${DB.tasks.filter(t=>t.contactId===id).map(t=>`<div class="task-item"><div class="task-check ${t.done?'done':''}" onclick="toggleTaskInDetail('${t.id}','${id}')">${t.done?'<i class="ti ti-check" style="font-size:10px;color:white"></i>':''}</div><div style="flex:1"><div style="font-size:13px;${t.done?'text-decoration:line-through;color:var(--color-text-secondary)':''}">${t.title}</div><div style="font-size:11px;color:var(--color-text-secondary)">Due ${fmtDate(t.due)}</div></div>${calLink(gcalTask(t))}</div>`).join('')||'<p style="color:var(--color-text-secondary);font-size:13px;margin-top:8px">No tasks</p>'}</div>`;
+  else if(tab==='tasks')dc.innerHTML=`<div style="margin-top:8px">${DB.tasks.filter(t=>t.contactId===id).map(t=>`<div class="task-item"><div class="task-check ${t.done?'done':''}" onclick="toggleTaskInDetail('${t.id}','${id}')">${t.done?'<i class="ti ti-check" style="font-size:10px;color:white"></i>':''}</div><div class="task-open" style="flex:1" onclick="openTaskView('${t.id}')"><div style="font-size:13px;${t.done?'text-decoration:line-through;color:var(--color-text-secondary)':''}">${rEsc(t.title)}</div><div style="font-size:11px;color:var(--color-text-secondary)">${t.due?'Due '+fmtDate(t.due):'No due date'}</div></div>${calLink(gcalTask(t))}</div>`).join('')||'<p style="color:var(--color-text-secondary);font-size:13px;margin-top:8px">No tasks</p>'}</div>`;
   else if(tab==='emails')dc.innerHTML=`<div style="margin-top:8px">${DB.emails.filter(e=>e.contactId===id).map(e=>`<div style="padding:8px 0;border-bottom:0.5px solid var(--color-border-tertiary)"><span style="font-weight:500">${e.subject}</span> <span class="badge ${e.direction==='Sent'?'badge-blue':'badge-green'}">${e.direction}</span><div style="font-size:11px;color:var(--color-text-secondary);margin-top:2px">${fmtDate(e.date)}</div></div>`).join('')||'<p style="color:var(--color-text-secondary);font-size:13px;margin-top:8px">No emails</p>'}</div>`;
 }
 function toggleTaskInDetail(tid,cid){const t=DB.tasks.find(x=>x.id===tid);t.done=!t.done;save();detailTab('tasks',cid);}
@@ -1489,33 +1498,154 @@ function addDealNote(id){
   d.notes.push({date:new Date().toISOString().slice(0,10),text:txt});save();openDealDetail(id);
 }
 function deleteDeal(id){if(!confirm('Delete this deal?'))return;DB.deals=DB.deals.filter(x=>x.id!==id);save();closeModal();renderDeals();}
-function renderTasks(filter='all'){
+// ── TASKS PAGE: "Show completed" switch + "Overdue only" chip, both remembered on this device ──
+function taskPrefGet(k,def){try{const v=localStorage.getItem(k);return v===null?def:v==='1';}catch(e){return def;}}
+function taskPrefSet(k,on){try{localStorage.setItem(k,on?'1':'0');}catch(e){}}
+let taskShowDone=taskPrefGet('xo_task_show_done',false);
+let taskOverdueOnly=taskPrefGet('xo_task_overdue_only',false);
+function taskToggleDone(on){taskShowDone=on;taskPrefSet('xo_task_show_done',on);renderTasks();}
+function taskToggleOverdue(){taskOverdueOnly=!taskOverdueOnly;taskPrefSet('xo_task_overdue_only',taskOverdueOnly);renderTasks();}
+function taskToday(){return new Date().toISOString().slice(0,10);}
+function taskRefresh(){
+  const tp=document.getElementById('page-tasks');if(tp&&tp.style.display!=='none')renderTasks();
+  const db=document.getElementById('page-dashboard');if(db&&db.style.display!=='none')renderDashboard();
+}
+function renderTasks(){
   const el=document.getElementById('page-tasks');
-  const now=new Date().toISOString().slice(0,10);
-  let tasks=DB.tasks.slice();
-  if(filter==='pending')tasks=tasks.filter(t=>!t.done);
-  if(filter==='done')tasks=tasks.filter(t=>t.done);
-  if(filter==='overdue')tasks=tasks.filter(t=>!t.done&&t.due<now);
-  tasks.sort((a,b)=>(a.due||'').localeCompare(b.due||''));
+  const now=taskToday();
+  const open=DB.tasks.filter(t=>!t.done), overdue=open.filter(t=>t.due&&t.due<now), doneN=DB.tasks.length-open.length;
+  let tasks=taskOverdueOnly?overdue.slice():(taskShowDone?DB.tasks.slice():open.slice());
+  // open tasks first (soonest due first, no date last), then finished ones
+  tasks.sort((a,b)=>(a.done-b.done)||((a.due||'9999').localeCompare(b.due||'9999')));
   el.innerHTML=topbar('Tasks',`<button class="btn btn-primary btn-sm" onclick="openTaskModal()"><i class="ti ti-plus"></i> Add task</button>`)+`
   <div class="content">
-    <div class="tab-bar">
-      ${['all','pending','overdue','done'].map(f=>`<div class="tab ${filter===f?'active':''}" onclick="renderTasks('${f}')">${f.charAt(0).toUpperCase()+f.slice(1)}</div>`).join('')}
+    <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:14px">
+      <span style="font-size:13px;color:var(--color-text-secondary)"><strong style="color:var(--color-text-primary)">${open.length}</strong> open</span>
+      <button class="btn btn-sm ${taskOverdueOnly?'btn-primary':''}" onclick="taskToggleOverdue()" title="Show only overdue tasks"${overdue.length&&!taskOverdueOnly?' style="color:var(--color-text-danger);border-color:var(--color-text-danger)"':''}><i class="ti ti-alarm"></i> ${overdue.length} overdue${taskOverdueOnly?' · showing only these':''}</button>
+      <label class="tsw" style="margin-left:auto" title="Finished tasks are hidden unless this is on"><input type="checkbox" ${taskShowDone?'checked':''} ${taskOverdueOnly?'disabled':''} onchange="taskToggleDone(this.checked)"/><span class="tsw-track"><span class="tsw-knob"></span></span> Show completed (${doneN})</label>
     </div>
     <div class="card">
       ${tasks.length?tasks.map(t=>`<div class="task-item">
-        <div class="task-check ${t.done?'done':''}" onclick="toggleTask('${t.id}','tasks')">${t.done?'<i class="ti ti-check" style="font-size:10px;color:white"></i>':''}</div>
-        <div style="flex:1;min-width:0">
-          <div style="font-size:13px;${t.done?'text-decoration:line-through;color:var(--color-text-secondary)':''};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.title}</div>
-          <div style="font-size:11px;color:${t.due<now&&!t.done?'var(--color-text-danger)':'var(--color-text-secondary)'}">Due ${fmtDate(t.due)} · ${contactName(t.contactId)}</div>
+        <div class="task-check ${t.done?'done':''}" onclick="toggleTask('${t.id}','tasks')" title="${t.done?'Mark as not done':'Mark as done'}">${t.done?'<i class="ti ti-check" style="font-size:10px;color:white"></i>':''}</div>
+        <div class="task-open" style="flex:1;min-width:0" onclick="openTaskView('${t.id}')" title="Open this task">
+          <div style="font-size:13px;${t.done?'text-decoration:line-through;color:var(--color-text-secondary)':''};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${rEsc(t.title)}</div>
+          <div style="font-size:11px;color:${t.due&&t.due<now&&!t.done?'var(--color-text-danger)':'var(--color-text-secondary)'}">${t.due?'Due '+fmtDate(t.due):'No due date'}${t.contactId?' · '+rEsc(contactName(t.contactId)):''}${(t.log&&t.log.length)?` · <i class="ti ti-notes"></i> ${t.log.length}`:''}</div>
         </div>
         <span class="badge ${PRIORITY_COLORS[t.priority]||'badge-gray'}">${t.priority}</span>
         ${t.due?`<a class="btn btn-sm" href="${gcalTask(t)}" target="_blank" rel="noopener" title="Add to Google Calendar" style="margin-left:6px"><i class="ti ti-calendar-plus"></i></a>`:''}
-        <button class="btn btn-sm" onclick="openTaskModal('${t.id}')" style="margin-left:4px"><i class="ti ti-edit"></i></button>
-        <button class="btn btn-sm btn-danger" onclick="deleteTask('${t.id}')" style="margin-left:4px"><i class="ti ti-trash"></i></button>
-      </div>`).join(''):`<div class="empty-state"><i class="ti ti-checkbox"></i><p>No tasks here</p></div>`}
+        <button class="btn btn-sm" onclick="openTaskView('${t.id}')" title="Open" style="margin-left:4px"><i class="ti ti-chevron-right"></i></button>
+      </div>`).join(''):`<div class="empty-state"><i class="ti ti-checkbox"></i><p>${taskOverdueOnly?'Nothing overdue. Nice work!':(open.length||!DB.tasks.length?'No tasks here':'All caught up! Every task is done.')}</p></div>`}
     </div>
   </div>`;
+}
+
+// ── TASK VIEW: open a task, see who it's for, log what happened, decide what's next ──
+function taskAddDays(n){const d=new Date();d.setDate(d.getDate()+n);return d.toISOString().slice(0,10);}
+function taskNextMonday(){const d=new Date();const add=((8-d.getDay())%7)||7;d.setDate(d.getDate()+add);return d.toISOString().slice(0,10);}
+function openTaskView(id){
+  const t=DB.tasks.find(x=>x.id===id);if(!t)return;
+  if(!Array.isArray(t.log))t.log=[];
+  const c=t.contactId?DB.contacts.find(x=>x.id===t.contactId):null;
+  const now=taskToday(), late=!t.done&&t.due&&t.due<now;
+  let who='';
+  if(c){
+    const addr=[c.address,[c.city,c.state].filter(Boolean).join(', '),c.zip].filter(Boolean).join(' · ');
+    const mailDiff=c.mailSame===false&&(c.mailAddress||c.mailCity||c.mailZip);
+    const recent=(c.activities||[]).slice(-3).reverse();
+    who=`<div class="modal-section" style="margin-top:0">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+        <div class="avatar" style="background:${avatarColor(c.name)};color:${avatarText(c.name)}">${initials(c.name)}</div>
+        <div style="flex:1;min-width:0"><a class="gcal" style="cursor:pointer;font-size:14px;font-weight:500" onclick="openContactDetail('${c.id}')">${rEsc(c.name)}</a>${c.goesBy?` <span style="font-size:12px;color:var(--color-text-secondary)">("${rEsc(c.goesBy)}")</span>`:''}</div>
+        <span class="badge ${REL_COLORS[c.stage]||'badge-gray'}">${c.stage}</span>
+      </div>
+      ${contactBarHtml(c,addr,mailDiff)}
+      ${recent.length?`<div style="font-size:12px;color:var(--color-text-secondary);margin:4px 0 6px">Latest with ${rEsc(c.goesBy||c.name.split(' ')[0])}:</div>${recent.map(a=>`<div class="note-item"><div class="note-date">${fmtDate(a.date)} · ${a.type||'Note'}</div><div style="font-size:13px">${rEsc(a.text)}</div></div>`).join('')}`:''}
+    </div>`;
+  }else{
+    who=`<div style="font-size:12px;color:var(--color-text-tertiary);margin-bottom:12px"><i class="ti ti-user-off"></i> Not linked to a contact. Use <strong>Edit</strong> to attach one.</div>`;
+  }
+  const quick=(lbl,date)=>`<button class="btn btn-sm" onclick="taskMoveDue('${id}','${date}')">${lbl}</button>`;
+  showModal(`<div class="modal-header"><h2>Task</h2><button class="btn btn-sm" onclick="closeModal()"><i class="ti ti-x"></i></button></div>
+  <div class="modal-body">
+    <div style="display:flex;gap:10px;align-items:flex-start;margin-bottom:14px">
+      <div class="task-check ${t.done?'done':''}" style="margin-top:3px" onclick="taskViewToggle('${id}')" title="${t.done?'Mark as not done':'Mark as done'}">${t.done?'<i class="ti ti-check" style="font-size:10px;color:white"></i>':''}</div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:16px;font-weight:500;${t.done?'text-decoration:line-through;color:var(--color-text-secondary)':''}">${rEsc(t.title)}</div>
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:6px;font-size:12px">
+          <span class="badge ${PRIORITY_COLORS[t.priority]||'badge-gray'}">${t.priority}</span>
+          ${t.done?'<span class="badge badge-green">Done</span>':''}
+          <span style="color:${late?'var(--color-text-danger)':'var(--color-text-secondary)'};font-weight:${late?600:400}">${t.due?'Due '+fmtDate(t.due)+(late?' · overdue':''):'No due date'}</span>
+        </div>
+      </div>
+    </div>
+    ${who}
+    <div class="modal-section">
+      <div class="modal-section-title">What happened?</div>
+      <div style="display:flex;gap:6px;margin-bottom:6px;flex-wrap:wrap"><select id="tv-type" style="max-width:130px">${['Call','Text','Meeting','Email','Voicemail','Note'].map(x=>`<option>${x}</option>`).join('')}</select></div>
+      <textarea id="tv-text" style="height:70px" placeholder="e.g. Left a voicemail; talked through the rollover; she's sending her statement..."></textarea>
+      <div style="display:grid;grid-template-columns:1fr auto;gap:6px;margin-top:8px">
+        <input id="tv-next" placeholder="Next step, if any (becomes a new task)"/>
+        <input id="tv-next-due" type="date" value="${taskAddDays(3)}" style="width:auto"/>
+      </div>
+      <div style="font-size:11px;color:var(--color-text-tertiary);margin-top:4px">${c?`Saved to ${rEsc(c.name)}'s activity and this task's history.`:"Saved to this task's history."}</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px">
+        ${t.done?'':`<button class="btn btn-primary btn-sm" onclick="taskLogSave('${id}',true)"><i class="ti ti-circle-check"></i> Save &amp; mark done</button>`}
+        <button class="btn btn-sm${t.done?' btn-primary':''}" onclick="taskLogSave('${id}',false)"><i class="ti ti-device-floppy"></i> Save${t.done?'':', keep open'}</button>
+      </div>
+    </div>
+    ${t.done?'':`<div class="modal-section">
+      <div class="modal-section-title">Push it back</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">${quick('Tomorrow',taskAddDays(1))}${quick('+3 days',taskAddDays(3))}${quick('Next Monday',taskNextMonday())}${quick('+2 weeks',taskAddDays(14))}<input type="date" value="${t.due||''}" onchange="taskMoveDue('${id}',this.value)" style="width:auto;padding:4px 8px" title="Pick a date"/></div>
+    </div>`}
+    <div class="modal-section">
+      <div class="modal-section-title">Task history</div>
+      ${t.log.length?t.log.slice().reverse().map(a=>`<div class="note-item"><div class="note-date">${fmtDate(a.date)} · ${rEsc(a.type||'Note')}</div><div style="font-size:13px">${rEsc(a.text)}</div></div>`).join(''):'<p style="font-size:13px;color:var(--color-text-secondary)">Nothing logged on this task yet.</p>'}
+    </div>
+  </div>
+  <div class="modal-footer">
+    ${t.due?`<a class="btn" href="${gcalTask(t)}" target="_blank" rel="noopener" title="Add to Google Calendar"><i class="ti ti-calendar-plus"></i></a>`:''}
+    <button class="btn btn-danger" onclick="deleteTask('${id}')" title="Delete task"><i class="ti ti-trash"></i></button>
+    <button class="btn" onclick="openTaskModal('${id}')"><i class="ti ti-edit"></i> Edit</button>
+    ${c?`<button class="btn" onclick="openContactDetail('${c.id}')"><i class="ti ti-user"></i> Open contact</button>`:''}
+  </div>`);
+}
+function taskLogSave(id,markDone){
+  const t=DB.tasks.find(x=>x.id===id);if(!t)return;
+  if(!Array.isArray(t.log))t.log=[];
+  const type=document.getElementById('tv-type').value;
+  const text=document.getElementById('tv-text').value.trim();
+  const next=document.getElementById('tv-next').value.trim();
+  const nextDue=document.getElementById('tv-next-due').value;
+  if(!text&&!next&&!markDone){showToast('Type what happened or a next step first','err');return;}
+  const today=taskToday();
+  if(text){
+    t.log.push({date:today,type,text});
+    const c=t.contactId?DB.contacts.find(x=>x.id===t.contactId):null;
+    if(c){if(!Array.isArray(c.activities))c.activities=[];c.activities.push({date:today,type,text:text+' (task: '+t.title+')'});}
+  }
+  let msg=[];
+  if(next){
+    DB.tasks.push({id:uid(),title:next,contactId:t.contactId||'',due:nextDue,priority:t.priority||'Medium',done:false,log:[]});
+    t.log.push({date:today,type:'Next step',text:next+(nextDue?' (due '+fmtDate(nextDue)+')':'')});
+    msg.push('next-step task added');
+  }
+  if(markDone&&!t.done){t.done=true;t.doneDate=today;t.log.push({date:today,type:'Done',text:'Marked done'});msg.unshift('Task done');}
+  save();taskRefresh();
+  showToast((msg.length?msg.join(' · '):'Saved'),'ok');
+  if(markDone)closeModal();else openTaskView(id);
+}
+function taskMoveDue(id,date){
+  const t=DB.tasks.find(x=>x.id===id);if(!t||!date||t.due===date)return;
+  if(!Array.isArray(t.log))t.log=[];
+  t.log.push({date:taskToday(),type:'Rescheduled',text:(t.due?fmtDate(t.due):'no date')+' → '+fmtDate(date)});
+  t.due=date;save();taskRefresh();showToast('Moved to '+fmtDate(date),'ok');openTaskView(id);
+}
+function taskViewToggle(id){
+  const t=DB.tasks.find(x=>x.id===id);if(!t)return;
+  t.done=!t.done;if(!Array.isArray(t.log))t.log=[];
+  if(t.done)t.doneDate=taskToday();
+  t.log.push({date:taskToday(),type:t.done?'Done':'Reopened',text:t.done?'Marked done':'Marked not done'});
+  save();taskRefresh();openTaskView(id);
 }
 function contactPickerHtml(inputId, selectedId){
   const sel = selectedId ? ((DB.contacts.find(c=>c.id===selectedId)||{}).name||'') : '';
@@ -1543,10 +1673,10 @@ function saveTask(id){
   const title=document.getElementById('t-title').value.trim();if(!title){alert('Task title required.');return;}
   const data={title,contactId:contactIdByName(document.getElementById('t-contact').value),due:document.getElementById('t-due').value,priority:document.getElementById('t-priority').value};
   if(id){Object.assign(DB.tasks.find(x=>x.id===id),data);}else{DB.tasks.push({id:uid(),...data,done:false});}
-  save();closeModal();renderTasks();
+  save();taskRefresh();if(id)openTaskView(id);else closeModal();
 }
-function toggleTask(id,page='dashboard'){const t=DB.tasks.find(x=>x.id===id);t.done=!t.done;save();if(page==='tasks')renderTasks();else renderDashboard();}
-function deleteTask(id){if(!confirm('Delete task?'))return;DB.tasks=DB.tasks.filter(x=>x.id!==id);save();renderTasks();}
+function toggleTask(id){const t=DB.tasks.find(x=>x.id===id);t.done=!t.done;if(t.done)t.doneDate=taskToday();save();taskRefresh();if(t.done)showToast('Task done','ok');}
+function deleteTask(id){if(!confirm('Delete task?'))return;DB.tasks=DB.tasks.filter(x=>x.id!==id);save();closeModal();taskRefresh();}
 let calDate=new Date();
 function renderCalendar(){
   const el=document.getElementById('page-calendar');
