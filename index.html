@@ -2350,7 +2350,307 @@ const ROLL_FROM_TYPES=['403(b)','457(b)','401(k)','401(a)','TRS refund','Traditi
 const ROLL_INTO_TYPES=['Annuity','IRA','Other'];
 const ROLL_TPA=['Not needed','Pending','Approved'];
 const ROLL_PAPER=['Nothing yet','Client received it','Completed & returned'];
-const ROLL_STALL_DAYS=14;
+const ROLL_STALL_DAYS=14; // fallback when the company isn't in the transfer directory
+// ── TRANSFER COMPANY DIRECTORY (from National Life Group's agent portal) ──
+// Each company: n=name, a=extra names people type, t=product lines:
+// [product, e-signatures, stale days (text), processing days, phone, email, hours, requires own paperwork, special notes]
+const XFER_SOURCE={label:'NLG Transfer Company Information',url:'https://www.nationallife.com/agent/book-of-business/new-business/Transfer-Company-Information',captured:'2026-11-09'};
+const XFER_COS=[
+{n:'ADP Retirement Services',a:['ADP'],t:[
+ ['401(k)','No','N/A',5,'855-237-4671','','8:00 AM-8:00 PM EST','Yes',"ADP Retirement Services will send their Surrender Form to the client upon the client's phoned request. This form can be faxed."],
+ ['Pensions','No','90',21,'844-237-7367','','8:00 AM-6:00 PM EST','Yes',"ADP Retirement Services will send their Surrender packet to client upon the client's phoned request. Hard copy, original paperwork is required."]]},
+{n:'Allianz Life Insurance Company of North America',a:['Allianz'],t:[
+ ['Fixed & Equity Indexed Annuity','Yes, Replacements under $500k','60',28,'800-729-9743','fixedannuity@send.allianzlife.com','8:00 AM-5:00 PM CST','','Policies beginning with the number 9 and are 8 numeric characters total, or Older policies (pre 2010) begin with any number OTHER than 100 or 002 and are all numeric and various lengths are processed at this location.'],
+ ['Universal Life & Fixed Annuity','Yes, Replacements under $500k','90',30,'800-743-5066','','7:30 AM-4:30 PM CST','','Fixed Annuity policies beginning with 100 and 002 are processed at this location. All other Fixed Annuity policies are processed at the Fixed Annuity location.'],
+ ['Variable Annuity','Yes, Replacements under $500k','60',7,'800-542-5427','variableannuity@send.allianzlife.com','8:00 AM-5:00 PM CST','','Policies issued in 2014 or later: begin with AV followed by 9 numeric characters (11 total). Policies issued in 2013 or earlier: begin with GA followed by 1 alpha or numeric character and then 5 numbers (8 total).']]},
+{n:'American Equity Investment Life Insurance Company',a:['American Equity'],t:[
+ ['','No','90',15,'888-221-1234','service@american-equity.com','7:00 AM-5:00 PM CST','','eSignatures submitted on a NON-ACORD 951 eForm or replacement forms not accompanying the eSigned ACORD 951 eForm are accepted with conditions.']]},
+{n:'American Fidelity Assurance Company',a:['American Fidelity'],t:[
+ ['','No','60',7,'800-662-1106','annuity-services@americanfidelity.com','7:00 AM-7:00 PM CST','',"A copy of the client's identification is required. This form can be faxed or emailed as a PDF attachment."]]},
+{n:'American Funds',a:['Capital Group'],t:[
+ ['','Yes on transfers under $125k','60',7,'800-421-0180','','8:00 AM-7:00 PM EST','','Required on all transfers of $125k+: Original Medallion Signature Guarantee Stamp is required on the Replacement Form and on the 401(k) "Retirement Plan Payment Instructions" Form.']]},
+{n:'American General Life Insurance Company',a:['American General','Corebridge','Corebridge Financial','AIG'],t:[
+ ['Fixed Annuity - American General','No','90',7,'800-424-4990','annuityservice@corebridgefinancial.com','7:00 AM-6:00 PM CST','No','Constellation Indexed policies begin with 1M or 1A followed by 5 numbers (7 total). Power Index policies begin with SE, 1E, 2E, 4E. Policies beginning with 6C, or EC23 (8 total), or T + 8 digits + D (10 total) are processed here. Additional policy rules may apply.'],
+ ['Variable Annuity - American General - Ovation','No','60',3,'800-255-8402','','7:30 AM-5:00 PM CST','No','Ovation policies begin with EA, CA or RA, followed by a third letter and 5 numeric digits.']]},
+{n:'American National Insurance Company',a:['American National'],t:[
+ ['Fixed Annuity','Yes','60',33,'800-252-9546','customerservicecenter@americannational.com','7:00 AM-6:00 PM CST','No','Policies beginning with 143, 145, 148, EA, NY, LAR or L00 (zero, zero), 7001 and are 8 to 10 characters total are processed at this location.'],
+ ['Variable Annuity','No','30',14,'800-306-2959','customerservicecenter@americannational.com','7:00 AM-6:00 PM CST','No','Policies beginning with UA, UW, UGN, and UGR and are 8 characters total are processed at this location.']]},
+{n:'American United Life Insurance Company',a:['American United Life','AUL','OneAmerica'],t:[
+ ['','No','90',32,'800-537-6442','policyservice@oneamerica.com','9:00 AM-6:00 PM CST','Yes','Inforce policies beginning with 06, 07, 16, 24, 33 or 34 and are 10 characters total are processed at this location.']]},
+{n:'Ascensus',a:[],t:[
+ ['','No','N/A',7,'888-652-8086','requests@ascensus.com','8:00 AM-8:00 PM EST','Yes',"Ascensus will send their surrender form to the client upon the client's phone request. This form must be sent to the client's Employer/Plan Administrator."]]},
+{n:'Aspire Smart Retirement',a:['Aspire','Aspire Financial'],t:[
+ ['','No','N/A',14,'866-634-5873','','8:00 AM-8:00 PM EST','Yes',"Aspire will send their surrender form to the client upon the client's phoned request, or it can be downloaded from the company website. This form must be signed by the Plan Administrator."]]},
+{n:'Athene Annuity & Life Assurance Company',a:['Athene'],t:[
+ ['Fixed Annuity','Yes','N/A',7,'888-266-8489','documents@athene.com','8:00 AM-5:00 PM CST','',''],
+ ['Variable Annuity','No','90',12,'888-232-6486','clientservices@ameritas.com','7:00 AM-5:00 PM CST','','']]},
+{n:'Bank of America',a:['BofA'],t:[
+ ['','No','N/A',14,'888-827-1812','','8:00 AM-8:00 PM EST','No',"Hard copy, original paperwork with client's wet signature is required."]]},
+{n:'BENCOR',a:[],t:[
+ ['','No','180',14,'888-258-3422','questions@bencorservices.com','8:00 AM-6:00 PM EST','Yes','Medallion Signature Guarantee required on transfers of $150k+ (copy accepted). BENCOR will send their "Direct Rollover Form" to the client upon the client\'s phoned request, or it can be downloaded at https://bencor.rprgonline.com using the client\'s online account. Can be faxed or emailed as a PDF for transfers under $150k; $150k+ needs hard copy, original paperwork with wet signatures. FICA Alternative Plans: rollover paperwork must be sent to the Plan Administrator.']]},
+{n:'Brighthouse Life Insurance Company',a:['Brighthouse','Brighthouse Financial'],t:[
+ ['','No','60',14,'833-208-3018 / 800-882-1292','BHFrequests@brighthousefinancial.com','8:30 AM-6:30 PM EST','','Variable Annuities: policies beginning with 11, 15, 16, 32, 34, 35, 36, 44 or 74 (10 total). Indexed Annuities: beginning with 28, 52, 224 or 225 (9 total). Fixed Annuities: beginning with 25, 81, 87 or 97 (10 total) or 84, 88, 92, 94 or 98 (9 total).']]},
+{n:'Charles Schwab',a:['Schwab'],t:[
+ ['401(k) - Charles Schwab Employee Plans','No','N/A',7,'800-724-7526','','8:00 AM-10:00 PM EST','',"Charles Schwab will send their Distribution Form to their employee upon the employee's phoned request, or it can be downloaded from workpace.schwab.com (as NLG lists it), or completed via the phone. This form can be faxed."],
+ ['All Products','Yes','90',7,'877-566-4948','','9:00 AM-7:00 PM EST','',"Fund liquidation is only required if positions in the client's account need to be liquidated: either the client calls to liquidate and funds are held as cash until the transfer paperwork is received, OR the replacement paperwork with the liquidation instructions must be wet signed."]]},
+{n:'Edward Jones',a:[],t:[
+ ['','Yes','30',21,'800-441-2357 ext. 1','','7:00 AM-5:30 PM CST','','']]},
+{n:'Empower',a:['Empower Retirement','Empower Annuity'],t:[
+ ['','No','N/A',14,'800-701-8255','','6:00 AM-8:00 PM MST','Yes',"Empower Annuity Insurance Company of America will send their Surrender Form to the employee or their employer's HR department upon a phoned request. This form can be mailed to the address on the Surrender Form."]]},
+{n:'Equitable Financial Life and Annuity Company',a:['Equitable','AXA','AXA Equitable'],t:[
+ ['Fixed Annuity','No','0',14,'877-899-3743','','8:30 AM-7:00 PM EST','','Policy numbers beginning with 200 and ending with EC, EE, EG, EQ or EV.'],
+ ['Life','No','365',14,'800-777-6510','life-service@equitable.com','8:30 AM-5:00 PM EST','','Medallion Signature Guarantee required on all replacements $250k+.'],
+ ['SPDA','No','0',14,'800-628-7789','','9:00 AM-5:00 PM EST','',''],
+ ['Variable','No','90',7,'800-628-6673','','8:00 AM-5:00 PM EST','','Client must initiate transfer process.']]},
+{n:'EquiTrust Life Insurance Company',a:['EquiTrust'],t:[
+ ['','Yes','60',21,'866-598-3692','customer.service@equitrust.com','8:00 AM-5:00 PM CST','No','Policies processed at this location begin with EQ000 followed by 7 digits and end with F (13 total).']]},
+{n:'Equity Services',a:[],t:[
+ ['','Yes with full paper trail','90',7,'800-344-7437','','8:45 AM-5:00 PM EST','','']]},
+{n:'Federal Employees Retirement System',a:['FERS','TSP','Thrift Savings Plan'],t:[
+ ['','Only online through Client Portal','60',12,'877-968-3778 ext. 3','','7:00 AM-9:00 PM EST','','Client must complete the transfer via their TSP online account. Requires TSP-specific surrender form, accessed 100% online via client portal. Replacement status only provided to client.']]},
+{n:'Fidelity',a:['Fidelity Investments'],t:[
+ ['Non-qualified','No','90',7,'800-221-9923','','8:30 AM-5:00 PM EST','','Transfers over $100k require original paperwork to be sent.'],
+ ['403(b)','No','60',3,'800-343-0860','','8:00 AM-11:59 PM EST','','Requires their own paperwork. Replacement status is only shared with the client.'],
+ ['Annuity','No','30',5,'800-634-9361','','8:30 AM-7:00 PM EST','','Original copies required for policy numbers beginning with: 111, 121, 131, 132, 21, 23, 321, 322, 323, 34, 41, 51, 811, 812, 831, 832, 900, FC, F10, FX, FV.'],
+ ['Variable Life','No','0',5,'888-343-8376','','8:00 AM-5:00 PM EST','','Client must initiate the transfer process. Original copies with wet signatures must be provided. Policies beginning with EVL, SVL, VL.']]},
+{n:'Fidelity & Guaranty Life Insurance Company',a:['F&G','Fidelity & Guaranty','Fidelity and Guaranty'],t:[
+ ['','Yes','30',30,'888-513-8797','fg.annuity.requests@nttdata.com','8:00 AM-5:00 PM CST','','eSignatures accepted without conditions: Hexure Firelight, Ebix AnnuityNet, iPipeline Affirm for Annuities.']]},
+{n:'First Symetra National Insurance Company of New York',a:['Symetra','First Symetra'],t:[
+ ['','Yes','90',10,'800-457-9015 ext. 22135','','6:00 AM-4:30 PM PST','No','Policies beginning with "77" and are 9 characters total are processed at this location.']]},
+{n:'Florida Retirement System',a:['FRS'],t:[
+ ['','No','0',30,'844-377-1888','retirement@dms.myflorida.com','8:00 AM-5:00 PM EST','',"FRS will send their paperwork to the client upon the client's phone request ONLY. Status is only shared with the client."]]},
+{n:'Guardian',a:['Guardian Life'],t:[
+ ['','No','180',14,'800-441-6455','ILSolutions@glic.com','8:00 AM-6:00 PM EST (Fri to 5:00 PM)','','This location processes all Life including 1035 and NY Reg 60 policies.']]},
+{n:'Horace Mann Life Insurance Company',a:['Horace Mann'],t:[
+ ['','No','60',20,'800-999-1030','','7:00 AM-7:00 PM CST','','']]},
+{n:'Industrial Alliance Insurance and Financial Services, Inc',a:['Industrial Alliance','iA','iA Financial','American Amicable'],t:[
+ ['Annuities','No','60',3,'866-363-3290','GLSB-AAWF@zinnia.com','7:00 AM-5:00 PM CST','Yes','Policies beginning with 002, 003 and 008 (10 total). They send their "Outgoing Funds Request Form" to the client upon phoned request or upon receipt of the issuing carrier\'s exchange paperwork. Fax/PDF OK under $25k; $25k+ needs hard copy, original paperwork with wet signatures.'],
+ ['Life & Annuity','No','N/A',14,'800-736-7311','cx@aatx.com','8:00 AM-4:00 PM CST','No','Policies beginning with "ZA" and "005" are processed at this location.']]},
+{n:'Invesco',a:[],t:[
+ ['','No','N/A',7,'800-959-4246','','7:00 AM-6:00 PM CST','No','Policies that are 8 to 10 characters total are processed at this location. Additional policy rules may apply.']]},
+{n:'Jackson National Life Insurance Company',a:['Jackson','Jackson National'],t:[
+ ['','Yes','60',10,'800-644-4565','customercare@jackson.com','8:00 AM-7:00 PM EST','No','Policies beginning with 12 and 02 and are 10 alphanumeric characters total.']]},
+{n:'John Hancock Financial Services',a:['John Hancock'],t:[
+ ['','No','N/A',10,'800-294-3575','','8:00 AM-10:00 PM EST','',"Client should go to https://myplan.johnhancock.com and complete their plan-specific distribution application (not all are online). If a form is required it must be sent hard copy, original. Client should request the check be made out to the issuing carrier; it is mailed to the client, who forwards it to the advisor or issuing carrier."]]},
+{n:'J.P. Morgan Securities',a:['JP Morgan','JPMorgan','Chase'],t:[
+ ['','No','90',20,'800-392-5749','','8:00 AM-6:00 PM EST','No','Policies beginning with 7, 8, or 9 (8 total). Client must call to liquidate funds before the issuing carrier submits transfer paperwork (held as cash until received). Medallion Signature Guarantee or Notary Stamp required on all transfers (copy accepted).']]},
+{n:'Lincoln Financial',a:['Lincoln','Lincoln National'],t:[
+ ['','No','90',14,'800-242-1421','multifundforms@lfg.com','8:30 AM-7:00 PM EST','No','Medallion Signature Guarantee required on all transfers. Copy accepted; fax OK if the stamp is legible, otherwise hard copy, original paperwork.']]},
+{n:'Lincoln Investment',a:[],t:[
+ ['','No','90',14,'800-242-1421','','8:30 AM-7:00 PM EST','No','Medallion Signature Guarantee required on all transfers. Copy accepted; fax OK if the stamp is legible, otherwise hard copy, original paperwork.']]},
+{n:'LPL Financial Corporation',a:['LPL','LPL Financial'],t:[
+ ['All Products','Yes','180',7,'858-450-9606 ext. 9','imaging.email@lpl.com','7:30 AM-4:00 PM EST','Only for eSigned transfer forms',"A copy of the client's driver's license with signature, or Form F67 filled in by an LPL advisor, must be submitted if a Notary Stamp or Medallion Signature Guarantee isn't provided. Can be faxed or emailed as a PDF."],
+ ['Group Retirement Plans','No','180',3,'855-400-5950','ftc@dstsystems.com','7:00 AM-5:00 PM CST','Yes','Original Medallion Signature Guarantee required on replacements of $250k+. LPL will send their "Retirement Distribution Plan Redemption Form" upon the client\'s phoned request, or download from www.ftcplanaccess.com. Fax/PDF OK under $250k; $250k+ needs hard copy, original paperwork with wet signatures.']]},
+{n:'Mass Mutual',a:['MassMutual Ascend','Great American'],t:[
+ ['Fixed Annuity','Yes','365',14,'800-854-3649','annuitygroupprocessing@mmascend.com','8:00 AM-4:30 PM EST','','Policies beginning with 00, 01, 03, 05, 07, 08, 13, 80, 19, 810, 820 followed by an alpha character (4 to 10 total). Former Old Standard Life (S...) and Old West Annuity (W...) policies are 4 to 8 characters.'],
+ ['Variable Annuity','Yes','90',5,'800-789-6771','annuitygroupprocessing@mmascend.com','8:00 AM-4:30 PM EST','','Policies beginning with 118 or 228 and are 10 characters total.'],
+ ['Life','No','180',7,'800-272-2216','lifefax@massmutual.com','8:00 AM-8:00 PM EST','','Life including 1035 and NY Reg 60 policies, except Blue Chip Variable Universal Life (begin with "006", 10 digits; now with Commonwealth Annuity and Life).']]},
+{n:'Massachusetts Mutual Life Insurance Company',a:['MassMutual'],t:[
+ ['Annuities beginning with 57 & 58','No','90',4,'866-645-2362','massmutual.services@zinnia.com','7:00 AM-7:00 PM CST','','Policies beginning with 57 or 58, nine digits long. Indexed begin with 580; Variable 574-579; Fixed 570-573.'],
+ ['Annuities beginning with A to Z','No','120',7,'800-272-2216','MassMutualAnnuityServiceCenter@massmutual.com','7:00 AM-8:00 PM EST','','Policies beginning with two or three letters, followed by three to seven numbers.']]},
+{n:'Merrill Lynch Investments',a:['Merrill','Merrill Lynch'],t:[
+ ['','No','N/A',14,'800-229-9040','','8:00 AM-9:00 PM EST','','Client must call to liquidate funds before the issuing carrier submits transfer paperwork (held as cash until received). Medallion Signature Guarantee required on in-kind transfers of $50k+ and non in-kind transfers of $100k+ (copy accepted).']]},
+{n:'MetLife',a:[],t:[
+ ['Life','No','60',27,'800-638-5000 / 877-638-0411 / 833-642-1007','indliferequests@metlife.com','8:00 AM-7:00 PM EST','','Life including 1035 and NY Reg 60 policies. Group Variable Universal Life and Individual Life policies are not processed at this location.']]},
+{n:'Metropolitan Life Insurance Company',a:['Metropolitan Life'],t:[
+ ['401(k)','No','90',10,'800-543-2520','','8:00 AM-10:00 PM EST','',"They send their plan-specific \"Distribution Rollover Form\" upon the client's phoned request, or it can be downloaded using the client's online account. This form can be faxed."],
+ ['Annuity','No','180',7,'800-638-7732','requests@metlife.com','8:00 AM-6:00 PM CST','','']]},
+{n:'Midland Life Insurance Company',a:['Midland Life'],t:[
+ ['','No','60',30,'800-637-4475','','7:00 AM-4:30 PM CST','','Policy numbers begin with E or X and have 5 characters.']]},
+{n:'National Integrity Life Insurance Company',a:['National Integrity','Integrity Life'],t:[
+ ['','Yes','30',30,'800-325-8583','','8:00 AM-5:00 PM EST','No','Policies beginning with 5 (6 total); 1100, 2100 or 2200 (10 total); 96, 97 or 98 (10 total); W00 (10 total).']]},
+{n:'Nationwide Life and Annuity Insurance Company',a:['Nationwide'],t:[
+ ['Annuity','Yes','60',7,'800-848-6331','annuitydocs@nationwide.com','8:00 AM-8:00 PM EST','',''],
+ ['Deferred Compensation - 457 Plan','No','30',14,'877-677-3678','rpublic@nationwide.com','8:00 AM-11:00 PM EST','','']]},
+{n:'New York Life',a:['NY Life'],t:[
+ ['','Yes','30',6,'800-598-2019','','9:00 AM-6:00 PM EST','No','Policies beginning with 57, 58, 63, VL, S2 or 750 and are 8 characters total.']]},
+{n:'North American Company for Life and Health Insurance',a:['North American','Sammons'],t:[
+ ['','Yes','180',14,'866-322-7069','ac@sfgmembers.com','7:30 AM-5:00 PM CST','','']]},
+{n:'Northwestern Mutual',a:[],t:[
+ ['','No','60',7,'800-388-8123','customerservice8200@northwesternmutual.com','7:00 AM-6:00 PM CST','',"Client must request the ceding carrier's Surrender Form. Pre-replacement letters and NY Reg 60 forms go to the NY Reg 60 pre-replacement location first; once disclosure is done, the 1035/replacement paperwork comes here. Processes all Term and Whole Life."]]},
+{n:'Ohio National (AuguStar)',a:['Ohio National','AuguStar'],t:[
+ ['','No','90',40,'800-366-6654 / 877-446-6010','documentcenter@augustarfinancial.com','8:30 AM-5:00 PM EST','','All Life including 1035 and NY Reg 60 policies.']]},
+{n:'Pacific Life',a:[],t:[
+ ['','No','180',180,'800-800-7681 / 800-347-7787','policyservice@pacificlife.com','8:00 AM-8:00 PM EST','','Variable and Fixed Life policies and a small group of Fixed Annuity policies including 403(b), 401(k), IRA, Roth, SEP, 1035 and NY Reg 60.']]},
+{n:'Penn Mutual',a:[],t:[
+ ['','No','90',7,'800-523-0650','annuityservicesrequests@pennmutual.com','8:30 AM-6:00 PM EST','No','']]},
+{n:'Pershing LLC',a:['Pershing'],t:[
+ ['','Yes','180',5,'201-413-2323','','9:00 AM-3:30 PM EST','','Client must liquidate funds before the transfer request is sent.']]},
+{n:'PlanMember Securities',a:['PlanMember','Plan Member'],t:[
+ ['','No','120',7,'800-874-6910 ext. 2','','6:00 AM-5:00 PM PST','No','']]},
+{n:'Primerica Financial Services',a:['Primerica'],t:[
+ ['','No','N/A',7,'800-544-5445','','8:00 AM-8:00 PM EST','','Original Medallion Signature Guarantee Stamp is required.']]},
+{n:'Principal',a:['Principal Financial','Principal Life'],t:[
+ ['','No','60',10,'800-852-4450','annuityprocessing@principal.com','7:00 AM-6:00 PM CST','',"They send their Surrender Form upon the client's phoned request, or the client can process it online through their secured account. This form can be faxed."]]},
+{n:'Prudential Insurance Company of America',a:['Prudential','Pru'],t:[
+ ['','No','60',3,'888-778-2888','annuityserviceforms@prudential.com','8:00 AM-6:00 PM EST','Only for 403(b)','Policies beginning with E + 7 numbers (8 total), 000 + 6 numbers (9 total), or F197 (8 total). Requires Owner and Annuitant names on the LOA, filled out exactly as shown on the statement.']]},
+{n:'Reassure America Life Insurance Company (REALIC)',a:['REALIC','Reassure America'],t:[
+ ['','No','60',30,'800-637-4475','','7:30 AM-4:30 PM CST','','Policy numbers begin with E or X and have 5 characters.']]},
+{n:'ReliaStar Life Insurance Company',a:['ReliaStar'],t:[
+ ['','No','180',7,'877-884-5050','','8:00 AM-6:00 PM CST','Yes','Requires their own paperwork. Policies beginning with 2, 3, 4, 5 or 6 letters, up to 15 characters. Replacement status is only shared with the client. (Includes ReliaStar Life Insurance Company of New York.)']]},
+{n:'Security Benefit Life Insurance Company',a:['Security Benefit'],t:[
+ ['','No','60',7,'800-888-2461','annuityprocessing@securitybenefit.com','7:00 AM-6:00 PM CST','','']]},
+{n:'Teacher Retirement System of Texas',a:['TRS','TRS of Texas','Texas TRS'],t:[
+ ['','No','N/A',60,'800-223-8778','','7:00 AM-6:00 PM CST','','']]},
+{n:'TIAA-CREF Individual & Institutional Services',a:['TIAA','TIAA-CREF'],t:[
+ ['','No','180',7,'800-842-2252','','8:00 AM-10:00 PM EST','Yes',"Some policies begin with an 8-digit TIAA contract # followed by an 8-digit CREF account number. They send their Surrender/Direct Transfer Form (with policy-specific surrender terms) upon the client's phoned request. This form can be faxed."]]},
+{n:'Transamerica',a:[],t:[
+ ['','No','90',3,'800-462-2391','annuities.customerservice@transamerica.com','8:00 AM-5:00 PM CST','No',"Policies are 9 characters and begin with 1, 2, 7, or 8. A copy of state ID or driver's license is required for all replacements (fax or PDF OK); without it a Medallion Signature Guarantee is required (copy accepted)."]]},
+{n:'T. Rowe Price',a:['T Rowe Price','TRowe'],t:[
+ ['','No','N/A',5,'800-492-7670','ominfo@troweprice.com','8:00 AM-8:00 PM EST','No',"Client must call this number to initiate and complete the transfer/rollover, or use their secured online account."]]},
+{n:'United States Life Insurance Company in the City of New York',a:['US Life','United States Life'],t:[
+ ['Fixed Annuity','No','90',7,'800-424-4490','Annuityservice@corebridgefinancial.com','7:00 AM-6:00 PM CST','','Policies beginning with 2BA or 2BF, AB, AC, MN or VA.'],
+ ['Fixed Life','No','60',12,'877-200-0220','','8:00 AM-6:00 PM CST','',''],
+ ['Variable Annuity','No','60',7,'800-247-6584','Annuityservice@corebridgefinancial.com','7:00 AM-6:00 PM CST','','Policies beginning with MM0000, PLF, VA2 and VA4000.']]},
+{n:'Vanguard',a:[],t:[
+ ['Large Employer Retirement Plans','No','90',3,'800-523-1188','','8:30 AM-9:00 PM EST','','Policies are 6 numeric characters and begin with 09 or 99. Status is only shared with the client. Client must initiate the transfer process.'],
+ ['Mutual Funds','No','60',12,'800-669-0498','','8:30 AM-5:00 PM EST','','Transfer status requests can be sent to TOA_Support@vanguard.com.']]},
+{n:'Variable Annuity Life Insurance Company',a:['VALIC','Corebridge VALIC'],t:[
+ ['Annuity','No','60',7,'800-448-2542','','7:00 AM-8:00 PM CST','','Client must initiate the transfer process. Replacement status only shared with the client.'],
+ ['Life','No','60',14,'800-888-2542','','8:00 AM-6:00 PM CST','','']]},
+{n:'Venerable Insurance & Annuity Company',a:['Venerable'],t:[
+ ['','No','180',3,'800-366-0066','service@venerable.com','7:30 AM-5:00 PM EST','Yes',"Policies begin with C or I (capital i), 6 numbers, a dash, then 0X, 0W, 0Y, MN or MP (10 total). They send their Outgoing Transfer Form upon the client's phoned request, or it can be downloaded from the client's online account. Can be faxed or emailed as a PDF."]]},
+{n:'Voya Financial Advisors, Inc.',a:['Voya Financial Advisors'],t:[
+ ['','No','180',14,'800-356-2906','','8:30 AM-5:00 PM EST','','']]},
+{n:'VOYA Retirement Insurance and Annuity Company',a:['Voya','Voya Retirement','ING'],t:[
+ ['Fixed & Indexed Annuity','No','180',7,'800-369-5303','service@venerable.com','7:30 AM-5:00 PM CST','',''],
+ ['Group Annuity','No','90',7,'800-584-6001','','8:00 AM-9:00 PM EST','','Group plan policies beginning with VK followed by four numbers. Additional policy rules may apply.'],
+ ['Variable Annuity','No','180',7,'800-366-0066','service@venerable.com','7:30 AM-5:00 PM CST','',''],
+ ['Life','No','180',30,'800-247-8009 / 877-886-5050','liferequest@voya.com','7:00 AM-6:00 PM CST','','All Life including 1035 and NY Reg 60 policies.']]},
+{n:'Wells Fargo',a:['Wells Fargo Advisors','A.G. Edwards'],t:[
+ ['','No','90',10,'866-224-5708','','8:00 AM-11:59 PM EST','No','Policies are usually 8 characters and may begin with 888, 0 or 400 (former A.G. Edwards: 907 or 908). Client must call to liquidate funds before the issuing carrier submits transfer paperwork (held as cash until received).']]}
+];
+// Matching a typed company name ("Horace Mann", "Corebridge", "Schwab") to the directory
+function xferNorm(s){return (s||'').toLowerCase().replace(/&/g,' and ').replace(/[^a-z0-9 ]/g,' ').replace(/\b(the|of|inc|llc|co|company|corporation|corp|insurance|life|annuity|financial|services|group|and)\b/g,' ').replace(/\s+/g,' ').trim();}
+let _xferIdx=null;
+function xferIndex(){
+  if(_xferIdx)return _xferIdx;
+  _xferIdx={};
+  XFER_COS.forEach(c=>{[c.n,...(c.a||[])].forEach(nm=>{const k=xferNorm(nm);if(k&&!_xferIdx[k])_xferIdx[k]=c;});});
+  return _xferIdx;
+}
+function xferFind(company){
+  const q=xferNorm(company);if(!q)return null;
+  const idx=xferIndex();
+  if(idx[q])return idx[q];
+  if(q.length<4)return null;
+  // "Edward Jones Investments" -> Edward Jones; "Horace Mann Life" -> Horace Mann (whole words only, shortest key wins)
+  let best=null,bestLen=1e9;
+  Object.keys(idx).forEach(k=>{
+    if(k.length<4)return;
+    if((q+' ').startsWith(k+' ')||(k+' ').startsWith(q+' ')){if(k.length<bestLen){best=idx[k];bestLen=k.length;}}
+  });
+  return best;
+}
+function xferNum(s){const n=parseInt(s,10);return isNaN(n)||n<=0?null:n;}
+// Which product line applies: the one picked on the rollover, else a guess from the account type
+function xferGuessLine(co,r){
+  if(co.t.length===1)return 0;
+  if(r.fromProduct){const i=co.t.findIndex(x=>x[0]===r.fromProduct);if(i>=0)return i;}
+  const ft=(r.fromType||'').toLowerCase(), names=co.t.map(x=>x[0].toLowerCase());
+  const tries=[];
+  if(/403/.test(ft))tries.push(/403/);
+  if(/457/.test(ft))tries.push(/457|deferred comp/);
+  if(/401/.test(ft))tries.push(/401|group retire|employer/);
+  for(const re of tries){const i=names.findIndex(n=>re.test(n));if(i>=0)return i;}
+  return -1;
+}
+// Everything the CRM needs about a rollover's transferring company
+function rollXfer(r){
+  const co=xferFind(r.fromCustodian);if(!co)return null;
+  const i=xferGuessLine(co,r);
+  if(i>=0){const L=co.t[i];return {co,idx:i,line:L,stale:xferNum(L[2]),proc:L[3]||null,exact:true};}
+  // Several product lines and no way to tell: be cautious (shortest stale window, longest processing time)
+  const st=co.t.map(L=>xferNum(L[2])).filter(Boolean), pr=co.t.map(L=>L[3]).filter(Boolean);
+  return {co,idx:-1,line:null,stale:st.length?Math.min(...st):null,proc:pr.length?Math.max(...pr):null,exact:false};
+}
+// Stalled = past the company's normal processing time plus a week of mail/handling (never sooner than 10 days)
+function rollStallDays(r){const x=rollXfer(r);return x&&x.proc?Math.max(10,x.proc+7):ROLL_STALL_DAYS;}
+// When the client's signed paperwork goes stale at the old company
+const ROLL_STALE_STAGES=['Client signed','Submitted','Transfer in progress'];
+const ROLL_STALE_WARN=14;
+function rollSignedDate(r){
+  if(r.letterSignedDate)return r.letterSignedDate;
+  const signedStages=ROLL_STAGES.slice(ROLL_SIGNED_IDX).filter(s=>s!=='Lost');
+  const hits=(r.activities||[]).filter(a=>a.type==='Stage'&&signedStages.some(s=>a.text==='→ '+s)).map(a=>a.date).filter(Boolean).sort();
+  return hits[0]||'';
+}
+function rollStaleInfo(r){
+  if(!ROLL_STALE_STAGES.includes(r.stage)||r.checkSent)return null;
+  const x=rollXfer(r);if(!x||!x.stale)return null;
+  const signed=rollSignedDate(r);if(!signed)return null;
+  const d=new Date(signed+'T12:00:00');if(isNaN(d))return null;
+  d.setDate(d.getDate()+x.stale);
+  const date=d.toISOString().slice(0,10);
+  return {date,days:x.stale,signed,left:rollDaysTo(date),fromLetter:!!r.letterSignedDate,exact:x.exact};
+}
+function rollStaleSoon(r){const s=rollStaleInfo(r);return s&&s.left!=null&&s.left<=ROLL_STALE_WARN?s:null;}
+function rollStaleText(s){return s.left<0?'stale '+(-s.left)+'d ago':(s.left===0?'goes stale today':'stale in '+s.left+'d');}
+
+// ── Display helpers ──
+function xferPhoneHtml(p){
+  return (p||'').split(' / ').map(x=>{const m=x.match(/^([\d\-\s()]+?)\s*(?:ext\.?\s*(\d+))?$/i);if(!m)return rEsc(x);const digits=m[1].replace(/\D/g,'');return `<a class="gcal" href="tel:+1${digits}${m[2]?','+m[2]:''}">${rEsc(x)}</a>`;}).join(' · ');
+}
+function xferLineRows(L){
+  const row=(lbl,val)=>val?`<span style="color:var(--color-text-secondary)">${lbl}</span><div>${val}</div>`:'';
+  const stale=L[2]==='N/A'?'N/A (no stale date)':(L[2]==='0'?'0 (per NLG; call to confirm)':L[2]+' days after signing');
+  return `<div style="display:grid;grid-template-columns:auto 1fr;gap:5px 12px;font-size:12px;align-items:start">
+    ${row('Phone',xferPhoneHtml(L[4]))}
+    ${row('Email',L[5]?`<a class="gcal" href="mailto:${sattr(L[5])}">${rEsc(L[5])}</a>`:'')}
+    ${row('Hours',rEsc(L[6]))}
+    ${row('E-signatures',rEsc(L[1]))}
+    ${row('Stale after',rEsc(stale))}
+    ${row('Processing',L[3]?L[3]+' days from receipt':'')}
+    ${row('Own paperwork',rEsc(L[7]))}
+    ${row('Notes',L[8]?`<span style="line-height:1.5">${rEsc(L[8])}</span>`:'')}
+  </div>`;
+}
+function xferSourceLine(){return `<div style="font-size:11px;color:var(--color-text-tertiary);margin-top:8px">From <a class="gcal" href="${XFER_SOURCE.url}" target="_blank" rel="noopener">${XFER_SOURCE.label}</a> (agent login), captured ${fmtDate(XFER_SOURCE.captured)}. Check there if something looks off.</div>`;}
+// Company info box inside a rollover's Paperwork section
+function rollXferHtml(r){
+  const co=(r.fromCustodian||'').trim();if(!co)return '';
+  const x=rollXfer(r);
+  if(!x)return `<div style="font-size:11px;color:var(--color-text-tertiary);margin-bottom:10px"><i class="ti ti-info-circle"></i> ${rEsc(co)} isn't on NLG's transfer company list. Save its phone number and quirks in the forms library below.</div>`;
+  const c=x.co;
+  const pick=c.t.length>1?`<div style="margin-bottom:8px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:12px"><span style="color:var(--color-text-secondary)">Product line</span><select onchange="rollSetXferLine('${r.id}',this.value)" style="width:auto;padding:4px 8px"><option value="">${x.idx<0?'— pick one —':'— auto: '+rEsc(c.t[x.idx][0])+' —'}</option>${c.t.map(L=>`<option ${r.fromProduct===L[0]?'selected':''}>${rEsc(L[0])}</option>`).join('')}</select>${x.idx<0?'<span style="font-size:11px;color:var(--color-text-tertiary)">Until you pick, alerts use the most cautious numbers.</span>':''}</div>`:'';
+  const s=rollStaleInfo(r);
+  const staleLine=s?`<div style="font-size:12px;margin-bottom:8px;padding:6px 8px;border-radius:6px;background:${s.left<=ROLL_STALE_WARN?'var(--color-background-danger)':'var(--color-background-secondary)'};${s.left<=ROLL_STALE_WARN?'color:var(--color-text-danger);font-weight:500':''}"><i class="ti ti-calendar-time"></i> Paperwork goes stale around <strong>${fmtDate(s.date)}</strong> (${rollStaleText(s)}): ${s.days} days after ${s.fromLetter?'the letter was signed':'it was signed'} on ${fmtDate(s.signed)}${s.exact?'':', using the shortest window until you pick a product line'}.</div>`:'';
+  const stall=ROLL_WAIT_STAGES.includes(r.stage)&&x.proc?`<div style="font-size:11px;color:var(--color-text-tertiary);margin-top:6px">Flagged as stalled after ${rollStallDays(r)} days waiting (their ${x.proc}-day processing time + a week for mail).</div>`:'';
+  return `<div style="border:0.5px solid var(--color-border-secondary);border-radius:8px;padding:10px 12px;margin-bottom:12px">
+    <div style="font-size:13px;font-weight:500;margin-bottom:8px"><i class="ti ti-building-bank" style="color:var(--brand);margin-right:4px"></i>${rEsc(c.n)}</div>
+    ${pick}${staleLine}
+    ${x.line?xferLineRows(x.line):c.t.map(L=>`<div style="margin-bottom:10px"><div style="font-size:12px;font-weight:500;margin-bottom:4px">${rEsc(L[0])}</div>${xferLineRows(L)}</div>`).join('')}
+    ${stall}${xferSourceLine()}
+  </div>`;
+}
+function rollSetXferLine(id,val){
+  const r=DB.rollovers.find(x=>x.id===id);if(!r)return;
+  r.fromProduct=val;
+  r.activities.push({date:rollToday(),type:'Checklist',text:'Product line at old company → '+(val||'auto')});
+  save();openRolloverDetail(id);rollRefresh();
+}
+// Searchable directory card on the Rollovers page
+let xferDirOpen='';
+function rollXferDirHtml(){
+  return `<div class="card" style="margin-top:16px">
+    <div style="margin-bottom:10px"><div style="font-size:13px;font-weight:500"><i class="ti ti-building-bank" style="color:var(--brand);margin-right:5px"></i>Transfer company directory <span style="font-size:11px;color:var(--color-text-tertiary);font-weight:400">${XFER_COS.length} companies</span></div>
+    <div style="font-size:11px;color:var(--color-text-secondary)">Phone numbers, stale days, processing times and quirks for the companies money transfers from. It shows up by itself on a rollover when the company name matches.</div></div>
+    <input id="xfer-q" placeholder="Search a company (e.g. Altruist, Corebridge, Horace Mann)…" oninput="xferDirFilter()" autocomplete="off"/>
+    <div id="xfer-list" style="margin-top:8px;max-height:420px;overflow:auto">${xferDirRows('')}</div>
+    ${xferSourceLine()}
+  </div>`;
+}
+function xferDirRows(q){
+  const n=xferNorm(q), raw=(q||'').trim().toLowerCase();
+  const list=XFER_COS.filter(c=>!raw||[c.n,...(c.a||[])].some(nm=>nm.toLowerCase().includes(raw)||(n&&xferNorm(nm).includes(n))));
+  if(!list.length)return `<p style="font-size:12px;color:var(--color-text-secondary);padding:8px 0">Not on NLG's list. Add it to your forms library below with whatever you learn.</p>`;
+  return list.map(c=>{const open=xferDirOpen===c.n;return `<div style="border-bottom:0.5px solid var(--color-border-tertiary);padding:7px 0">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;cursor:pointer" onclick="xferDirToggle('${sattr(c.n)}')"><span style="font-size:13px;font-weight:500">${rEsc(c.n)}${(c.a||[]).length?` <span style="font-size:11px;color:var(--color-text-tertiary);font-weight:400">${rEsc(c.a.join(', '))}</span>`:''}</span><i class="ti ti-chevron-${open?'up':'down'}" style="color:var(--color-text-tertiary)"></i></div>
+    ${open?`<div style="margin-top:8px">${c.t.map(L=>`<div style="margin-bottom:10px">${c.t.length>1?`<div style="font-size:12px;font-weight:500;margin-bottom:4px">${rEsc(L[0])}</div>`:''}${xferLineRows(L)}</div>`).join('')}</div>`:''}
+  </div>`;}).join('');
+}
+function xferDirFilter(){const q=document.getElementById('xfer-q');const el=document.getElementById('xfer-list');if(q&&el)el.innerHTML=xferDirRows(q.value);}
+function xferDirToggle(name){xferDirOpen=xferDirOpen===name?'':name;xferDirFilter();}
 function rEsc(v){return (v==null?'':(''+v)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 function rollMoneyParse(v){const n=parseFloat((v||'').toString().replace(/[^0-9.]/g,''));return isNaN(n)?'':Math.round(n*100)/100;}
 function rollMoneyStr(n){if(n===''||n==null||isNaN(n))return'';const [i,d]=Number(n).toFixed(2).split('.');return Number(i).toLocaleString('en-US')+(d!=='00'?'.'+d:'');}
@@ -2366,7 +2666,7 @@ function rollMoneyInput(el){
 function rollToday(){return new Date().toISOString().slice(0,10);}
 function rollClient(r){if(r.contactId){const c=DB.contacts.find(x=>x.id===r.contactId);if(c)return c.name;}return r.clientName||'(no client)';}
 function rollDaysInStage(r){return r.stageChangedAt?Math.floor((Date.now()-r.stageChangedAt)/864e5):0;}
-function rollIsStalled(r){return ROLL_WAIT_STAGES.includes(r.stage)&&rollDaysInStage(r)>ROLL_STALL_DAYS;}
+function rollIsStalled(r){return ROLL_WAIT_STAGES.includes(r.stage)&&rollDaysInStage(r)>rollStallDays(r);}
 function rollFormsOut(r){return ROLL_WAIT_STAGES.includes(r.stage)&&r.xferPaper==='Client received it';}
 function rollDaysTo(d){if(!d)return null;const t=new Date(rollToday()+'T12:00:00'),x=new Date(d+'T12:00:00');if(isNaN(x))return null;return Math.round((x-t)/864e5);}
 function normalizeRollovers(){
@@ -2379,7 +2679,7 @@ function normalizeRollovers(){
     if(r.checkSent===undefined) r.checkSent=false;
     if(r.mailTaskCreated===undefined) r.mailTaskCreated=false;
     if(r.mailTaskId===undefined) r.mailTaskId='';
-    ['requestSentDate','checkTaskId','letterTaskId'].forEach(k=>{if(r[k]===undefined)r[k]='';});
+    ['requestSentDate','checkTaskId','letterTaskId','fromProduct'].forEach(k=>{if(r[k]===undefined)r[k]='';});
     if(r.checkTaskCreated===undefined) r.checkTaskCreated=false;
     if(!Array.isArray(r.activities)) r.activities=[];
     if(!Array.isArray(r.notes)) r.notes=[];
@@ -2486,6 +2786,8 @@ function rollCardFlags(r){
     h+=`<div style="margin-top:6px"><span class="badge badge-red" style="font-size:10px"><i class="ti ti-alert-triangle"></i> Client forms out${d!=null?(d<0?' · overdue':' · due '+fmtMD(r.paperDeadline)):''}</span></div>`;
   }
   if(rollIsStalled(r)) h+=`<div style="margin-top:4px"><span class="badge badge-amber" style="font-size:10px"><i class="ti ti-hourglass"></i> ${rollDaysInStage(r)} days in stage</span></div>`;
+  const st=rollStaleSoon(r);
+  if(st) h+=`<div style="margin-top:4px"><span class="badge badge-red" style="font-size:10px"><i class="ti ti-calendar-time"></i> Paperwork ${rollStaleText(st)}</span></div>`;
   if(r.stage==='Transfer in progress'){
     const tpa=r.tpaStatus?`TPA: ${r.tpaStatus}`:'TPA: ?';
     h+=`<div style="margin-top:4px;font-size:11px;color:var(--color-text-secondary)">${tpa}${r.checkSent?' · <span style="color:var(--color-text-success);font-weight:500">check sent</span>':''}</div>`;
@@ -2524,10 +2826,11 @@ function renderRollovers(){
         </div>`;
       }).join('')}
     </div>`:`<div class="card"><div class="empty-state"><i class="ti ti-arrows-exchange"></i><p>No rollovers yet.<br>Add one to start tracking it from first conversation to funded.</p><button class="btn btn-primary btn-sm" style="margin-top:12px" onclick="openRolloverModal()"><i class="ti ti-plus"></i> Add rollover</button></div></div>`}
+    ${rollXferDirHtml()}
     ${rollFormsLibraryHtml()}
   </div>`;
 }
-function rollDatalist(id,field){const vals=[...new Set((DB.rollovers||[]).map(r=>(r[field]||'').trim()).filter(Boolean))].sort();return `<datalist id="${id}">${vals.map(v=>`<option value="${sattr(v)}"></option>`).join('')}</datalist>`;}
+function rollDatalist(id,field,extra){const vals=[...new Set((DB.rollovers||[]).map(r=>(r[field]||'').trim()).filter(Boolean).concat(extra||[]))].sort();return `<datalist id="${id}">${vals.map(v=>`<option value="${sattr(v)}"></option>`).join('')}</datalist>`;}
 function openRolloverModal(id='',defaultStage='New opportunity',prefillContactId=''){
   const r=id?DB.rollovers.find(x=>x.id===id):{contactId:prefillContactId,intoType:'Annuity',carrier:'National Life Group'};
   const clientField=r.contactId?contactPickerHtml('r-client',r.contactId):(contactPickerHtml('r-client','').replace('value=""',`value="${sattr(r.clientName||'')}"`));
@@ -2539,7 +2842,7 @@ function openRolloverModal(id='',defaultStage='New opportunity',prefillContactId
 
     <div class="modal-section-title" style="border-top:0.5px solid var(--color-border-tertiary);padding-top:12px">Rolling from</div>
     <div class="form-row"><div class="form-group" style="margin:0"><label>Account type</label><select id="r-from-type"><option value="">—</option>${ROLL_FROM_TYPES.map(t=>`<option ${r.fromType===t?'selected':''}>${t}</option>`).join('')}</select></div>
-    <div class="form-group" style="margin:0"><label>Current company (transferring)</label><input id="r-from-cust" list="r-cust-dl" value="${sattr(r.fromCustodian)}" placeholder="e.g. Corebridge, Equitable"/>${rollDatalist('r-cust-dl','fromCustodian')}</div></div>
+    <div class="form-group" style="margin:0"><label>Current company (transferring)</label><input id="r-from-cust" list="r-cust-dl" value="${sattr(r.fromCustodian)}" placeholder="e.g. Corebridge, Equitable"/>${rollDatalist('r-cust-dl','fromCustodian',XFER_COS.map(c=>c.n))}</div></div>
     <div class="form-group"><label>Estimated value</label><div style="position:relative"><span style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--color-text-secondary);pointer-events:none">$</span><input id="r-value" type="text" inputmode="decimal" autocomplete="off" style="padding-left:22px" value="${(r.value===''||r.value==null)?'':rollMoneyStr(r.value)}" placeholder="0" oninput="rollMoneyInput(this)"/></div></div>
 
     <div class="modal-section-title" style="border-top:0.5px solid var(--color-border-tertiary);padding-top:12px">Rolling into</div>
@@ -2634,6 +2937,7 @@ function openRolloverDetail(id){
       <span class="badge" style="background:${ROLL_STAGE_BG[r.stage]};color:#1a1a18">${r.stage}</span>
       <span style="font-size:12px;color:var(--color-text-secondary)">${rollDaysInStage(r)} day${rollDaysInStage(r)===1?'':'s'} in this stage</span>
       ${rollIsStalled(r)?'<span class="badge badge-amber"><i class="ti ti-hourglass"></i> stalled</span>':''}
+      ${rollStaleSoon(r)?`<span class="badge badge-red"><i class="ti ti-calendar-time"></i> paperwork ${rollStaleText(rollStaleSoon(r))}</span>`:''}
     </div>
     <div class="grid-2" style="gap:10px;margin-bottom:14px">
       <div class="metric-card"><div class="metric-label">Estimated value</div><div class="metric-value" style="font-size:18px">${snum(r.value)?fmt(snum(r.value)):'—'}</div></div>
@@ -2677,7 +2981,8 @@ function rolloverDashboardCard(){
   const rs=DB.rollovers||[];if(!rs.length)return'';
   const forms=rs.filter(rollFormsOut).sort((a,b)=>(a.paperDeadline||'9999').localeCompare(b.paperDeadline||'9999'));
   const stalled=rs.filter(r=>rollIsStalled(r)&&!rollFormsOut(r)).sort((a,b)=>a.stageChangedAt-b.stageChangedAt);
-  if(!forms.length&&!stalled.length)return'';
+  const stale=rs.filter(r=>rollStaleSoon(r)).sort((a,b)=>rollStaleInfo(a).date.localeCompare(rollStaleInfo(b).date));
+  if(!forms.length&&!stalled.length&&!stale.length)return'';
   const go=r=>`showPage('rollovers');setTimeout(()=>openRolloverDetail('${r.id}'),60)`;
   const formRow=r=>{const d=rollDaysTo(r.paperDeadline);const when=d==null?'no deadline set':(d<0?'overdue':(d===0?'due today':'due in '+d+'d'));return `<div class="alert-row" onclick="${go(r)}">
     <div class="alert-icon" style="background:#FCEBEB;color:#A32D2D"><i class="ti ti-alert-triangle"></i></div>
@@ -2689,14 +2994,19 @@ function rolloverDashboardCard(){
     <div style="min-width:0"><div style="font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${rEsc(rollClient(r))}</div><div style="font-size:11px;color:var(--color-text-secondary)">${r.stage}${r.fromCustodian?' · '+rEsc(r.fromCustodian):''}</div></div>
     <span class="alert-when" style="color:var(--color-text-warning)">${rollDaysInStage(r)} days</span>
   </div>`;
+  const staleRow=r=>{const s=rollStaleInfo(r);return `<div class="alert-row" onclick="${go(r)}">
+    <div class="alert-icon" style="background:#FCEBEB;color:#A32D2D"><i class="ti ti-calendar-time"></i></div>
+    <div style="min-width:0"><div style="font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${rEsc(rollClient(r))}</div><div style="font-size:11px;color:var(--color-text-secondary)">Paperwork at ${rEsc(rollCoName(r.fromCustodian))} goes stale ${fmtMD(s.date)}</div></div>
+    <span class="alert-when" style="color:var(--color-text-danger);font-weight:600">${s.left<0?'stale':(s.left===0?'today':s.left+'d')}</span>
+  </div>`;};
   return `<div class="grid-2" style="gap:16px;margin-bottom:16px">
     <div class="card" style="${forms.length?'border:1.5px solid var(--color-text-danger)':''}">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px"><span style="font-size:13px;font-weight:600;${forms.length?'color:var(--color-text-danger)':''}"><i class="ti ti-alert-triangle" style="margin-right:5px"></i>Rollover forms waiting on clients</span>${forms.length?`<span class="badge badge-red">${forms.length}</span>`:''}</div>
       ${forms.length?forms.map(formRow).join(''):'<div class="empty-state" style="padding:20px 0"><i class="ti ti-circle-check"></i>No client forms outstanding</div>'}
     </div>
     <div class="card">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px"><span style="font-size:13px;font-weight:500"><i class="ti ti-hourglass" style="color:#854F0B;margin-right:5px"></i>Stalled rollovers</span><span style="font-size:11px;color:var(--color-text-tertiary)">${ROLL_STALL_DAYS}+ days waiting</span></div>
-      ${stalled.length?stalled.map(stallRow).join(''):'<div class="empty-state" style="padding:20px 0"><i class="ti ti-circle-check"></i>Nothing stalled</div>'}
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px"><span style="font-size:13px;font-weight:500"><i class="ti ti-hourglass" style="color:#854F0B;margin-right:5px"></i>Stalled or going stale</span><span style="font-size:11px;color:var(--color-text-tertiary)">past each company's usual timing</span></div>
+      ${stale.map(staleRow).join('')}${stalled.map(stallRow).join('')}${(!stale.length&&!stalled.length)?'<div class="empty-state" style="padding:20px 0"><i class="ti ti-circle-check"></i>Nothing stalled</div>':''}
     </div>
   </div>`;
 }
@@ -2742,6 +3052,7 @@ function rollPaperworkHtml(r){
   else formsPart=`<div style="font-size:12px;color:var(--color-text-secondary)">No paperwork saved for ${rEsc(co)} yet. <a class="gcal" style="cursor:pointer" onclick="openRollFormModal('${sattr(rollFormKey(co))}','${id}','${sattr(co)}')">+ Add ${rEsc(co)}'s forms</a></div>`;
   const chk=(field,dateField,label)=>`<label class="chk" style="display:flex;gap:6px;align-items:center;font-size:12px"><input type="checkbox" ${r[field]?'checked':''} onchange="rollSetPaper('${id}','${field}','${dateField}',this.checked)"/> ${label}${r[field]&&r[dateField]?` <span style="color:var(--color-text-tertiary)">· ${fmtDate(r[dateField])}</span>`:''}</label>`;
   return `<div class="modal-section"><div class="modal-section-title">Paperwork</div>
+    ${rollXferHtml(r)}
     ${formsPart}
     <div style="display:flex;flex-direction:column;gap:6px;margin-top:10px">
       ${chk('clientHasForms','clientHasFormsDate',`Client has a copy of ${co?rEsc(rollCoName(co))+"'s":"the old company's"} forms`)}
